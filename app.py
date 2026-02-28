@@ -724,9 +724,9 @@ def page_preprocessing(uploaded, params):
         except Exception as e:
             progress_bar.empty()
             st.error(f"❌ Error saat preprocessing: {e}")
-                import traceback
-                st.code(traceback.format_exc())
-                return
+            import traceback
+            st.code(traceback.format_exc())
+            return
 
     # ── TAMPILKAN HASIL ────────────────────────────────────
     if 'df_result' in st.session_state and st.session_state.df_result is not None:
