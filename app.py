@@ -369,8 +369,8 @@ def build_popup(row):
     </div>"""
 
 
-@st.cache_data(show_spinner=False)
 def create_folium_map(df, map_type='marker', office_centroid=None):
+    # NOTE: Tidak menggunakan @st.cache_data karena folium.Map tidak bisa di-serialize
     center_lat  = df['lat'].median()
     center_long = df['long'].median()
     m = folium.Map(location=[center_lat, center_long], zoom_start=13, tiles='OpenStreetMap')
@@ -422,24 +422,50 @@ def create_folium_map(df, map_type='marker', office_centroid=None):
 
 
 def create_pydeck_map(df):
-    DEFAULT_COLOR = [52, 152, 219, 200]
-    color_map = {'HIGH':[231,76,60,200],'MED':[243,156,18,200],'LOW':[39,174,96,200]}
-    df_map = df.copy()
-    df_map['color']  = df_map['risk_level'].apply(lambda x: color_map.get(x, DEFAULT_COLOR))
-    df_map['radius'] = df_map['anomaly_score'].fillna(0) * 10 + 20
+    """
+    Buat peta 3D PyDeck.
+    Warna disimpan sebagai string hex agar kompatibel dengan semua versi PyDeck.
+    """
+    color_map = {'HIGH':'[231,76,60,200]','MED':'[243,156,18,200]','LOW':'[39,174,96,200]'}
+    DEFAULT_COLOR_STR = '[52,152,219,200]'
+
+    df_map = df[['karyawan_id','id_skpd','lat','long','risk_level','anomaly_score','dist_km']].copy()
+    df_map['anomaly_score'] = df_map['anomaly_score'].fillna(0).astype(int)
+    df_map['dist_km']       = df_map['dist_km'].fillna(0).round(3)
+    df_map['radius']        = (df_map['anomaly_score'] * 10 + 20).astype(int)
+
+    # Konversi warna ke list integer (bukan string) agar PyDeck bisa serialize
+    def to_color(risk):
+        m = {'HIGH':[231,76,60,200],'MED':[243,156,18,200],'LOW':[39,174,96,200]}
+        return m.get(risk, [52,152,219,200])
+
+    df_map['r'] = df_map['risk_level'].apply(lambda x: to_color(x)[0])
+    df_map['g'] = df_map['risk_level'].apply(lambda x: to_color(x)[1])
+    df_map['b'] = df_map['risk_level'].apply(lambda x: to_color(x)[2])
+    df_map['a'] = 200
 
     scatter = pdk.Layer(
-        'ScatterplotLayer', data=df_map,
-        get_position='[long, lat]', get_color='color', get_radius='radius',
-        pickable=True, opacity=0.8, stroked=True, filled=True,
-        radius_scale=6, radius_min_pixels=4, radius_max_pixels=30
+        'ScatterplotLayer',
+        data=df_map,
+        get_position='[long, lat]',
+        get_fill_color='[r, g, b, a]',
+        get_radius='radius',
+        pickable=True,
+        opacity=0.8,
+        stroked=False,
+        filled=True,
+        radius_scale=6,
+        radius_min_pixels=4,
+        radius_max_pixels=30
     )
     view = pdk.ViewState(
-        latitude=df['lat'].median(), longitude=df['long'].median(),
+        latitude=float(df['lat'].median()),
+        longitude=float(df['long'].median()),
         zoom=12, pitch=40, bearing=0
     )
     return pdk.Deck(
-        layers=[scatter], initial_view_state=view,
+        layers=[scatter],
+        initial_view_state=view,
         tooltip={
             'html': '<b>Karyawan:</b> {karyawan_id}<br><b>Risk:</b> {risk_level}<br>'
                     '<b>Score:</b> {anomaly_score}<br><b>Jarak:</b> {dist_km} km',
