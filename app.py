@@ -626,9 +626,7 @@ def tab_distance_analysis(df_filtered: pd.DataFrame):
                      'lat', 'long', 'dist_km', 'anomaly_score', 'risk_level', 'catatan']
         cols_show = [c for c in cols_show if c in extreme.columns]
         st.dataframe(
-            extreme[cols_show].head(50).style.background_gradient(
-                subset=['dist_km', 'anomaly_score'], cmap='Reds'
-            ),
+            extreme[cols_show].head(50),
             use_container_width=True
         )
     else:
@@ -694,9 +692,7 @@ def tab_employee_analysis(df_filtered: pd.DataFrame):
     risky = emp_agg[emp_agg['high_count'] > 0].sort_values('high_count', ascending=False)
     if len(risky) > 0:
         st.dataframe(
-            risky.head(30).style.background_gradient(
-                subset=['high_count', 'avg_score', 'max_dist_km'], cmap='Reds'
-            ),
+            risky.head(30),
             use_container_width=True
         )
     else:
