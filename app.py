@@ -215,13 +215,17 @@ def _build_popup(row: pd.Series) -> str:
 
 def create_pydeck_map(df: pd.DataFrame) -> pdk.Deck:
     """Buat peta 3D dengan PyDeck (ScatterplotLayer + HexagonLayer)."""
+    DEFAULT_COLOR = [52, 152, 219, 200]
     color_map = {
         'HIGH': [231, 76, 60, 200],
         'MED':  [243, 156, 18, 200],
         'LOW':  [39, 174, 96, 200]
     }
     df_map = df.copy()
-    df_map['color'] = df_map['risk_level'].map(color_map).fillna([52, 152, 219, 200])
+    # Gunakan apply agar list bisa dipakai sebagai default value
+    df_map['color'] = df_map['risk_level'].apply(
+        lambda x: color_map.get(x, DEFAULT_COLOR)
+    )
     df_map['radius'] = df_map['anomaly_score'].fillna(0) * 10 + 20
 
     scatter_layer = pdk.Layer(
