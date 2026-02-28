@@ -16,6 +16,7 @@ from sklearn.cluster import DBSCAN
 import pydeck as pdk
 import io
 import os
+import hashlib
 
 # ============================================================
 # PAGE CONFIG
@@ -36,6 +37,63 @@ st.markdown("""
 .step-desc{color:#444;font-size:.88rem;margin-top:.2rem}
 </style>
 """, unsafe_allow_html=True)
+
+
+# ============================================================
+# CACHE HELPERS
+# ============================================================
+
+def _df_hash(df: pd.DataFrame) -> str:
+    """Hash DataFrame untuk cache key."""
+    return hashlib.md5(pd.util.hash_pandas_object(df, index=True).values).hexdigest()
+
+
+@st.cache_data(show_spinner=False)
+def _load_file_cached(file_bytes: bytes, file_name: str) -> pd.DataFrame:
+    """Load file CSV/Excel dengan cache berdasarkan konten file."""
+    buf = io.BytesIO(file_bytes)
+    if file_name.endswith('.csv'):
+        return pd.read_csv(buf)
+    else:
+        return pd.read_excel(buf)
+
+
+@st.cache_data(show_spinner=False)
+def _run_pipeline_cached(df_hash_key: str, params_key: str, df_raw: pd.DataFrame, params: dict):
+    """
+    Cache wrapper untuk run_full_pipeline.
+    Cache key = hash DataFrame + hash params.
+    Hasil disimpan di cache Streamlit — tidak diulang saat pindah halaman.
+    """
+    return run_full_pipeline(df_raw, params)
+
+
+@st.cache_data(show_spinner=False)
+def _get_filtered(df_hash_key: str, skpd, risk_tuple, jenis_tuple, date_start, date_end, dist_min, dist_max):
+    """Cache hasil filter agar tidak dihitung ulang saat re-render."""
+    # Fungsi ini dipanggil dengan key unik, actual filtering dilakukan di apply_filters
+    return None  # placeholder — filtering tetap di apply_filters karena butuh df
+
+
+@st.cache_data(show_spinner=False)
+def _build_chart_pie(risk_counts_json: str):
+    """Cache pie chart risk level."""
+    import json
+    data = pd.DataFrame(json.loads(risk_counts_json))
+    return px.pie(data, values='count', names='risk_level', title='Distribusi Risk Level',
+                  color='risk_level',
+                  color_discrete_map={'HIGH':'#e74c3c','MED':'#f39c12','LOW':'#27ae60'}, hole=0.4)
+
+
+@st.cache_data(show_spinner=False)
+def _build_chart_bar_skpd(skpd_risk_json: str):
+    """Cache bar chart per SKPD."""
+    import json
+    data = pd.DataFrame(json.loads(skpd_risk_json))
+    return px.bar(data, x='id_skpd', y='count', color='risk_level',
+                  title='Distribusi Risk per SKPD', barmode='stack',
+                  color_discrete_map={'HIGH':'#e74c3c','MED':'#f39c12','LOW':'#27ae60'},
+                  labels={'id_skpd':'SKPD','count':'Jumlah','risk_level':'Risk'})
 
 
 # ============================================================
@@ -311,6 +369,7 @@ def build_popup(row):
     </div>"""
 
 
+@st.cache_data(show_spinner=False)
 def create_folium_map(df, map_type='marker', office_centroid=None):
     center_lat  = df['lat'].median()
     center_long = df['long'].median()
@@ -389,14 +448,16 @@ def create_pydeck_map(df):
     )
 
 
+@st.cache_data(show_spinner=False)
 def apply_filters(df, selected_skpd, risk_options, jenis_options, date_range, dist_range):
+    """Cache hasil filter — tidak dihitung ulang jika parameter sama."""
     f = df.copy()
     if selected_skpd != 'Semua':
         f = f[f['id_skpd'] == selected_skpd]
     if risk_options:
-        f = f[f['risk_level'].isin(risk_options)]
+        f = f[f['risk_level'].isin(list(risk_options))]
     if jenis_options:
-        f = f[f['jenis'].isin(jenis_options)]
+        f = f[f['jenis'].isin(list(jenis_options))]
     if date_range and len(date_range) == 2 and 'tanggal_kirim' in f.columns:
         f = f[(f['tanggal_kirim'].dt.date >= date_range[0]) & (f['tanggal_kirim'].dt.date <= date_range[1])]
     if 'dist_km' in f.columns:
@@ -554,10 +615,14 @@ def page_preprocessing(uploaded, params):
         # Coba load dari file lokal
         if os.path.exists('absen_pegawai.xlsx'):
             st.info("📂 Menggunakan file `absen_pegawai.xlsx` yang ditemukan di folder.")
-            df_raw = pd.read_excel('absen_pegawai.xlsx')
+            with open('absen_pegawai.xlsx','rb') as f:
+                file_bytes = f.read()
+            df_raw = _load_file_cached(file_bytes, 'absen_pegawai.xlsx')
         elif os.path.exists('dataset_absensi_final2.xlsx'):
             st.info("📂 Menggunakan file `dataset_absensi_final2.xlsx` yang ditemukan di folder.")
-            df_raw = pd.read_excel('dataset_absensi_final2.xlsx')
+            with open('dataset_absensi_final2.xlsx','rb') as f:
+                file_bytes = f.read()
+            df_raw = _load_file_cached(file_bytes, 'dataset_absensi_final2.xlsx')
         else:
             st.warning("⬆️ Silakan upload file absensi melalui sidebar kiri (CSV atau Excel).")
             st.markdown("""
@@ -575,10 +640,9 @@ def page_preprocessing(uploaded, params):
             """)
             return
     else:
-        if uploaded.name.endswith('.csv'):
-            df_raw = pd.read_csv(uploaded)
-        else:
-            df_raw = pd.read_excel(uploaded)
+        # Cache berdasarkan konten file (bukan nama) — aman untuk re-upload
+        file_bytes = uploaded.getvalue()
+        df_raw = _load_file_cached(file_bytes, uploaded.name)
 
     st.success(f"✅ File berhasil dimuat: **{len(df_raw):,} baris**, **{len(df_raw.columns)} kolom**")
 
@@ -610,16 +674,56 @@ def page_preprocessing(uploaded, params):
     st.markdown("### ⚙️ Jalankan Preprocessing Pipeline")
     st.markdown("Klik tombol di bawah untuk menjalankan semua tahap preprocessing secara otomatis.")
 
-    if st.button("🚀 Jalankan Preprocessing", type="primary", use_container_width=True):
-        with st.spinner("⏳ Memproses data... Mohon tunggu..."):
-            try:
-                df_result, log = run_full_pipeline(df_raw, params)
-                st.session_state['df_result'] = df_result
-                st.session_state['log']       = log
-                st.session_state['df_raw']    = df_raw
-                st.success("✅ Preprocessing selesai!")
-            except Exception as e:
-                st.error(f"❌ Error saat preprocessing: {e}")
+    # Cek apakah sudah ada hasil preprocessing dengan params yang sama
+    df_hash_key    = _df_hash(df_raw)
+    params_key     = str(sorted(params.items()))
+    already_done   = (
+        st.session_state.get('_last_df_hash') == df_hash_key and
+        st.session_state.get('_last_params_key') == params_key and
+        st.session_state.get('df_result') is not None
+    )
+
+    if already_done:
+        st.success("✅ Data sudah diproses sebelumnya — hasil tersimpan di cache. Tidak perlu diulang.")
+        st.info("💡 Jika ingin memproses ulang dengan parameter berbeda, ubah parameter di sidebar lalu klik tombol di bawah.")
+
+    if st.button(
+        "🚀 Jalankan Preprocessing" if not already_done else "🔄 Proses Ulang (Parameter Berubah)",
+        type="primary", use_container_width=True
+    ):
+        progress_bar = st.progress(0, text="⏳ Memulai preprocessing...")
+        status_text  = st.empty()
+        try:
+            status_text.info("📋 Step 1-3: Data Selection & Cleaning...")
+            progress_bar.progress(10, text="Step 1-3: Data Selection & Cleaning")
+
+            # Gunakan cached pipeline
+            df_result, log = _run_pipeline_cached(df_hash_key, params_key, df_raw, params)
+
+            progress_bar.progress(40, text="Step 4-6: Time & Coordinate Transform")
+            status_text.info("⏰ Step 4-6: Time & Coordinate Transform...")
+
+            progress_bar.progress(60, text="Step 7-8: DBSCAN & Estimasi Kantor")
+            status_text.info("🔵 Step 7-8: DBSCAN Spatial & Estimasi Kantor...")
+
+            progress_bar.progress(80, text="Step 9-11: Haversine & Validation")
+            status_text.info("📏 Step 9-11: Haversine Distance & Validation...")
+
+            progress_bar.progress(95, text="Step 12-13: ST-DBSCAN & Anomaly Scoring")
+            status_text.info("🟣 Step 12-13: ST-DBSCAN & Anomaly Scoring...")
+
+            # Simpan ke session state
+            st.session_state['df_result']       = df_result
+            st.session_state['log']             = log
+            st.session_state['df_raw']          = df_raw
+            st.session_state['_last_df_hash']   = df_hash_key
+            st.session_state['_last_params_key'] = params_key
+
+            progress_bar.progress(100, text="✅ Selesai!")
+            status_text.success("✅ Preprocessing selesai! Hasil tersimpan di cache — pindah halaman tidak akan menghapus data.")
+        except Exception as e:
+            progress_bar.empty()
+            st.error(f"❌ Error saat preprocessing: {e}")
                 import traceback
                 st.code(traceback.format_exc())
                 return
