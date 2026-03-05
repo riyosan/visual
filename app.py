@@ -1,22 +1,26 @@
 """
-Visualisasi & Deteksi Anomali Absensi
-Streamlit App - Integrated Preprocessing + Visualization + Prediction
+Visualisasi & Deteksi Anomali Absensi — FULL INTEGRATED APP
+Fitur baru:
+  - Upload data sudah diproses → langsung visualisasi
+  - Auto-detect & fix separator koma desimal (locale Indonesia)
+  - approver_status: analisis false negative, TOLAK, pending lama
+  - Menu 🎯 Hunting terintegrasi penuh
 """
 
 import streamlit as st
 import pandas as pd
 import numpy as np
 import folium
-from folium.plugins import HeatMap, MarkerCluster
+from folium.plugins import HeatMap, MarkerCluster, AntPath
 from streamlit_folium import st_folium
 import plotly.express as px
 import plotly.graph_objects as go
 from math import radians, sin, cos, sqrt, atan2
-from sklearn.cluster import DBSCAN
-import pydeck as pdk
 import io
-import os
 import hashlib
+from datetime import timedelta
+import warnings
+warnings.filterwarnings('ignore')
 
 # ============================================================
 # PAGE CONFIG
@@ -28,1564 +32,1628 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# ============================================================
+# GLOBAL CSS
+# ============================================================
 st.markdown("""
 <style>
-.main-header{font-size:2rem;font-weight:bold;color:#1f77b4;text-align:center;padding:1rem 0 0.2rem 0}
+.main-header{font-size:2rem;font-weight:bold;color:#1f77b4;text-align:center;padding:1rem 0 .2rem}
 .sub-header{text-align:center;color:#666;font-size:.95rem;margin-bottom:1.5rem}
 .step-box{background:#f8f9fa;border-left:4px solid #1f77b4;padding:.8rem 1rem;border-radius:0 8px 8px 0;margin-bottom:.8rem}
 .step-title{font-weight:bold;color:#1f77b4;font-size:1rem}
 .step-desc{color:#444;font-size:.88rem;margin-top:.2rem}
+
+/* Hunting */
+.hunt-header{background:linear-gradient(135deg,#1a1a2e,#16213e,#0f3460);padding:1.4rem 2rem;border-radius:12px;margin-bottom:1.5rem;border:1px solid #e94560;position:relative;overflow:hidden}
+.hunt-header::before{content:'🎯';position:absolute;right:2rem;top:50%;transform:translateY(-50%);font-size:4rem;opacity:.12}
+.hunt-title{font-size:1.7rem;font-weight:900;color:#e94560;font-family:'Courier New',monospace;letter-spacing:2px;margin:0}
+.hunt-sub{color:#a8b2d8;font-size:.83rem;margin-top:.3rem;font-family:'Courier New',monospace}
+.section-header{display:flex;align-items:center;gap:.8rem;background:#f8f9fa;border-left:5px solid #1f77b4;padding:.8rem 1.2rem;border-radius:0 10px 10px 0;margin:1.2rem 0 1rem}
+.section-icon{font-size:1.5rem}
+.section-title{font-size:1.1rem;font-weight:700;color:#2c3e50;margin:0}
+.section-desc{font-size:.78rem;color:#7f8c8d;margin:0}
+.metric-grid{display:flex;gap:.8rem;flex-wrap:wrap;margin:.8rem 0}
+.metric-card{flex:1;min-width:110px;background:white;border:1px solid #e0e0e0;border-radius:10px;padding:.9rem;text-align:center;box-shadow:0 2px 6px rgba(0,0,0,.06)}
+.metric-val{font-size:1.45rem;font-weight:800;color:#2c3e50}
+.metric-lbl{font-size:.68rem;color:#7f8c8d;margin-top:2px;text-transform:uppercase;letter-spacing:.4px}
+.metric-card.danger .metric-val{color:#e74c3c}
+.metric-card.warning .metric-val{color:#f39c12}
+.metric-card.success .metric-val{color:#27ae60}
+.metric-card.info .metric-val{color:#3498db}
+
+/* Approver badges */
+.badge-tolak{background:#e74c3c;color:white;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:bold}
+.badge-terima{background:#27ae60;color:white;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:bold}
+.badge-pending{background:#95a5a6;color:white;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:bold}
+.badge-high{background:#e74c3c;color:white;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:bold}
+
+.alert-box{border-radius:8px;padding:.9rem 1.1rem;margin:.6rem 0;font-size:.88rem}
+.alert-red{background:#fff5f5;border:1px solid #fc8181;color:#c53030}
+.alert-orange{background:#fffaf0;border:1px solid #f6ad55;color:#c05621}
+.alert-gray{background:#f7fafc;border:1px solid #cbd5e0;color:#4a5568}
+
+.watchlist-item{display:flex;align-items:center;gap:.7rem;background:white;border:1px solid #fde8e8;border-left:4px solid #e74c3c;border-radius:7px;padding:.6rem .9rem;margin-bottom:.4rem;font-size:.85rem}
+.trend-up{color:#e74c3c;font-weight:bold}
+.trend-down{color:#27ae60;font-weight:bold}
+.trend-flat{color:#95a5a6}
+.timeline-tip{background:#eef2ff;border-left:3px solid #667eea;padding:.45rem .8rem;border-radius:0 6px 6px 0;font-size:.8rem;color:#4a5568;margin-bottom:.8rem}
 </style>
 """, unsafe_allow_html=True)
 
-
 # ============================================================
-# CACHE HELPERS
+# HELPERS
 # ============================================================
+def haversine_scalar(lat1, lon1, lat2, lon2):
+    R = 6371000
+    dlat = radians(lat2-lat1); dlon = radians(lon2-lon1)
+    a = sin(dlat/2)**2 + cos(radians(lat1))*cos(radians(lat2))*sin(dlon/2)**2
+    return R * 2 * atan2(sqrt(a), sqrt(1-a))
 
-def _df_hash(df: pd.DataFrame) -> str:
-    """Hash DataFrame untuk cache key."""
+def risk_color_folium(r): return {'HIGH':'red','MED':'orange','LOW':'green'}.get(r,'gray')
+def risk_color_hex(r):    return {'HIGH':'#e74c3c','MED':'#f39c12','LOW':'#27ae60'}.get(r,'#95a5a6')
+
+def approver_badge(v):
+    if pd.isna(v) or str(v).strip()=='': return "<span class='badge-pending'>PENDING</span>"
+    v = str(v).strip().upper()
+    if 'TOLAK' in v: return "<span class='badge-tolak'>TOLAK</span>"
+    if 'TERIMA' in v: return "<span class='badge-terima'>TERIMA</span>"
+    return f"<span class='badge-pending'>{v}</span>"
+
+def _df_hash(df):
     return hashlib.md5(pd.util.hash_pandas_object(df, index=True).values).hexdigest()
 
+# ============================================================
+# AUTO-FIX DECIMAL SEPARATOR (koma → titik, locale Indonesia)
+# ============================================================
+def fix_decimal_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Deteksi kolom yang seharusnya numerik tapi terbaca string
+    karena separator desimal koma (locale Indonesia Excel).
+    Contoh: '3,5722868' → 3.5722868
+    """
+    numeric_target = [
+        'lat','long','lat_rad','long_rad',
+        'office_lat','office_long','dist_km',
+        'jarak','jam_desimal',
+        'anomaly_score','cluster_size_masuk','cluster_size_pulang',
+        'timestamp_num','jam','menit','weekday',
+        'outside_300m','no_note','far_no_note','far_with_note',
+        'near_but_status0','very_far','extreme_far',
+        'is_noise_masuk','is_noise_pulang',
+        'is_st_noise_masuk','is_st_noise_pulang',
+        'cluster_masuk','cluster_pulang',
+        'st_cluster_masuk','st_cluster_pulang',
+        'status_lokasi',
+    ]
+    fixed = []
+    for col in df.columns:
+        if col in numeric_target and df[col].dtype == object:
+            try:
+                df[col] = (
+                    df[col].astype(str)
+                    .str.replace(',', '.', regex=False)
+                    .str.strip()
+                )
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+                fixed.append(col)
+            except Exception:
+                pass
+        elif col not in numeric_target and df[col].dtype == object:
+            # Coba cek apakah kolom ini sebenarnya numerik
+            sample = df[col].dropna().head(20).astype(str)
+            if sample.str.match(r'^-?\d+,\d+$').mean() > 0.7:
+                try:
+                    df[col] = pd.to_numeric(
+                        df[col].astype(str).str.replace(',','.', regex=False),
+                        errors='coerce'
+                    )
+                    fixed.append(col)
+                except Exception:
+                    pass
+    return df, fixed
 
+# ============================================================
+# LOAD & VALIDATE (data sudah diproses)
+# ============================================================
 @st.cache_data(show_spinner=False)
-def _load_file_cached(file_bytes: bytes, file_name: str) -> pd.DataFrame:
-    """Load file CSV/Excel dengan cache berdasarkan konten file."""
+def load_processed_file(file_bytes: bytes, file_name: str):
     buf = io.BytesIO(file_bytes)
     if file_name.endswith('.csv'):
-        return pd.read_csv(buf)
+        # Coba berbagai separator
+        for sep in [',', ';', '\t']:
+            try:
+                df = pd.read_csv(buf, sep=sep)
+                if len(df.columns) > 3:
+                    break
+                buf.seek(0)
+            except Exception:
+                buf.seek(0)
     else:
-        return pd.read_excel(buf)
+        df = pd.read_excel(buf)
 
+    # Fix decimal
+    df, fixed_cols = fix_decimal_columns(df)
 
-@st.cache_data(show_spinner=False)
-def _run_pipeline_cached(df_hash_key: str, params_key: str, df_raw: pd.DataFrame, params: dict):
-    """
-    Cache wrapper untuk run_full_pipeline.
-    Cache key = hash DataFrame + hash params.
-    Hasil disimpan di cache Streamlit — tidak diulang saat pindah halaman.
-    """
-    return run_full_pipeline(df_raw, params)
+    # Parse datetime
+    if 'tanggal_kirim' in df.columns:
+        df['tanggal_kirim'] = pd.to_datetime(df['tanggal_kirim'], errors='coerce')
 
+    # Rebuild feature columns jika belum ada
+    if 'tanggal_kirim' in df.columns:
+        if 'jam' not in df.columns:
+            df['jam'] = df['tanggal_kirim'].dt.hour
+        if 'menit' not in df.columns:
+            df['menit'] = df['tanggal_kirim'].dt.minute
+        if 'jam_desimal' not in df.columns:
+            df['jam_desimal'] = df['jam'] + df['menit']/60.0
+        if 'weekday' not in df.columns:
+            df['weekday'] = df['tanggal_kirim'].dt.weekday
+        if 'tanggal' not in df.columns:
+            df['tanggal'] = df['tanggal_kirim'].dt.date
 
-@st.cache_data(show_spinner=False)
-def _get_filtered(df_hash_key: str, skpd, risk_tuple, jenis_tuple, date_start, date_end, dist_min, dist_max):
-    """Cache hasil filter agar tidak dihitung ulang saat re-render."""
-    # Fungsi ini dipanggil dengan key unik, actual filtering dilakukan di apply_filters
-    return None  # placeholder — filtering tetap di apply_filters karena butuh df
+    # Normalize jenis
+    if 'jenis' in df.columns:
+        df['jenis'] = df['jenis'].astype(str).str.strip().str.upper()
 
+    # Normalize approver_status
+    if 'approver_status' in df.columns:
+        df['approver_status'] = df['approver_status'].astype(str).str.strip()
+        df['approver_status'] = df['approver_status'].replace({'nan':'', 'None':'', 'NaN':''})
 
-@st.cache_data(show_spinner=False)
-def _build_chart_pie(risk_counts_json: str):
-    """Cache pie chart risk level."""
-    import json
-    data = pd.DataFrame(json.loads(risk_counts_json))
-    return px.pie(data, values='count', names='risk_level', title='Distribusi Risk Level',
-                  color='risk_level',
-                  color_discrete_map={'HIGH':'#e74c3c','MED':'#f39c12','LOW':'#27ae60'}, hole=0.4)
+    # Tambah kolom approver flags
+    if 'approver_status' in df.columns:
+        df['is_tolak']   = df['approver_status'].str.upper().str.contains('TOLAK', na=False).astype(int)
+        df['is_terima']  = df['approver_status'].str.upper().str.contains('TERIMA', na=False).astype(int)
+        df['is_pending'] = ((df['approver_status'] == '') | df['approver_status'].isna()).astype(int)
+        # False negative: TERIMA tapi HIGH risk
+        if 'risk_level' in df.columns:
+            df['false_negative'] = ((df['is_terima'] == 1) & (df['risk_level'] == 'HIGH')).astype(int)
+        else:
+            df['false_negative'] = 0
 
+    # Rebuild risk_level jika tidak ada
+    if 'risk_level' not in df.columns and 'anomaly_score' in df.columns:
+        def rl(s):
+            if s >= 70: return 'HIGH'
+            elif s >= 30: return 'MED'
+            return 'LOW'
+        df['risk_level'] = df['anomaly_score'].apply(rl)
 
-@st.cache_data(show_spinner=False)
-def _build_chart_bar_skpd(skpd_risk_json: str):
-    """Cache bar chart per SKPD."""
-    import json
-    data = pd.DataFrame(json.loads(skpd_risk_json))
-    return px.bar(data, x='id_skpd', y='count', color='risk_level',
-                  title='Distribusi Risk per SKPD', barmode='stack',
-                  color_discrete_map={'HIGH':'#e74c3c','MED':'#f39c12','LOW':'#27ae60'},
-                  labels={'id_skpd':'SKPD','count':'Jumlah','risk_level':'Risk'})
+    # system_action
+    if 'system_action' not in df.columns and 'risk_level' in df.columns:
+        def sa(r):
+            if r == 'LOW': return 'AUTO APPROVE'
+            elif r == 'MED': return 'HOLD (Perlu Review)'
+            return 'TEMP REJECT + NOTIF APPROVER'
+        df['system_action'] = df['risk_level'].apply(sa)
 
+    return df, fixed_cols
+
+def build_office_centroid(df: pd.DataFrame):
+    """Rekonstruksi office_centroid dari kolom office_lat/office_long."""
+    if 'office_lat' in df.columns and 'id_skpd' in df.columns:
+        oc = (df.groupby('id_skpd')[['office_lat','office_long']]
+              .first().reset_index())
+        return oc
+    return pd.DataFrame(columns=['id_skpd','office_lat','office_long'])
+
+def validate_dataframe(df: pd.DataFrame):
+    """Return list of warning strings."""
+    warns = []
+    required = ['karyawan_id','lat','long','tanggal_kirim','jenis','id_skpd']
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        warns.append(f"Kolom wajib tidak ditemukan: {missing}")
+    if 'lat' in df.columns:
+        n_bad = (~df['lat'].between(-90,90)).sum()
+        if n_bad > 0:
+            warns.append(f"{n_bad} baris koordinat lat di luar range valid")
+    if 'risk_level' not in df.columns:
+        warns.append("Kolom risk_level tidak ditemukan — akan dihitung ulang dari anomaly_score")
+    return warns
 
 # ============================================================
-# PREPROCESSING ENGINE
+# FILTER HELPER
 # ============================================================
-
-def haversine_scalar(lat1, lon1, lat2, lon2):
-    R = 6371.0
-    dlat = radians(lat2 - lat1)
-    dlon = radians(lon2 - lon1)
-    a = sin(dlat/2)**2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon/2)**2
-    return R * 2 * atan2(sqrt(a), sqrt(1 - a))
-
-
-def haversine_vectorized(lat1, lon1, lat2, lon2):
-    R = 6371.0
-    rlat1 = np.radians(lat1)
-    rlat2 = np.radians(lat2)
-    dlat  = np.radians(lat2 - lat1)
-    dlon  = np.radians(lon2 - lon1)
-    a = np.sin(dlat/2)**2 + np.cos(rlat1) * np.cos(rlat2) * np.sin(dlon/2)**2
-    return R * 2 * np.arcsin(np.sqrt(a))
-
-
-def run_full_pipeline(df_raw: pd.DataFrame, params: dict):
-    """
-    Full preprocessing pipeline.
-    Returns (df_result, log_dict)
-    """
-    log = {}
-    df = df_raw.copy()
-
-    # ── STEP 1: DATA SELECTION ──────────────────────────────
-    cols_needed  = ['karyawan_id','lat','long','tanggal_kirim','jenis','id_skpd','catatan','status_lokasi']
-    cols_optional = ['jarak','created_at','status_presensi','approver_status']
-    cols_use = [c for c in cols_needed if c in df.columns]
-    cols_use += [c for c in cols_optional if c in df.columns]
-    df = df[cols_use].copy()
-    log['step1_cols']  = cols_use
-    log['step1_rows']  = len(df)
-
-    # ── STEP 2: DATA PROFILING ──────────────────────────────
-    log['profile_null']        = df.isnull().sum().to_dict()
-    log['profile_rows_before'] = len(df)
-    if 'lat' in df.columns and 'long' in df.columns:
-        log['profile_coord_error'] = int(df[
-            (~df['lat'].between(-90,90)) | (~df['long'].between(-180,180))
-        ].shape[0])
-    dup_cols = [c for c in ['karyawan_id','tanggal_kirim','jenis'] if c in df.columns]
-    log['profile_duplicates'] = int(df.duplicated(subset=dup_cols).sum())
-
-    # ── STEP 3: DATA CLEANING ───────────────────────────────
-    df = df.dropna(subset=['lat','long'])
-    if 'jarak' in df.columns:
-        df['jarak'] = pd.to_numeric(df['jarak'], errors='coerce')
-        df = df.dropna(subset=['jarak'])
-    df = df[(df['lat'].between(-90,90)) & (df['long'].between(-180,180))]
-    df = df[~((df['lat']==0) & (df['long']==0))]
-    df = df.drop_duplicates(subset=dup_cols)
-    log['step3_rows_after'] = len(df)
-    log['step3_dropped']    = log['profile_rows_before'] - len(df)
-
-    # ── STEP 4: TIME TRANSFORMATION ─────────────────────────
-    df['tanggal_kirim'] = pd.to_datetime(df['tanggal_kirim'], errors='coerce')
-    df = df.dropna(subset=['tanggal_kirim'])
-    df['timestamp_num'] = df['tanggal_kirim'].astype('int64') // 10**9
-    df['jam']           = df['tanggal_kirim'].dt.hour
-    df['menit']         = df['tanggal_kirim'].dt.minute
-    df['jam_desimal']   = df['jam'] + df['menit'] / 60.0
-    df['tanggal']       = df['tanggal_kirim'].dt.date
-    df['weekday']       = df['tanggal_kirim'].dt.weekday
-    log['step4_rows'] = len(df)
-
-    # ── STEP 5: COORDINATE TRANSFORMATION ───────────────────
-    df['lat_rad']  = np.radians(df['lat'])
-    df['long_rad'] = np.radians(df['long'])
-
-    # ── STEP 6: NORMALISASI JENIS ────────────────────────────
-    df['jenis'] = df['jenis'].astype(str).str.strip().str.upper()
-    df_masuk  = df[df['jenis']=='M'].copy()
-    df_pulang = df[df['jenis']=='P'].copy()
-    log['step6_masuk']  = len(df_masuk)
-    log['step6_pulang'] = len(df_pulang)
-
-    # ── STEP 7: DBSCAN SPATIAL ──────────────────────────────
-    eps_km      = params.get('eps_km', 0.2)
-    min_samples = params.get('min_samples', 20)
-    eps_rad     = eps_km / 6371.0
-
-    def run_dbscan(subset, label_col):
-        if len(subset) < min_samples:
-            subset[label_col] = -1
-            return subset
-        coords = subset[['lat_rad','long_rad']].to_numpy()
-        labels = DBSCAN(eps=eps_rad, min_samples=min_samples, metric='haversine').fit_predict(coords)
-        subset[label_col] = labels
-        return subset
-
-    df_masuk  = run_dbscan(df_masuk,  'cluster_masuk')
-    df_pulang = run_dbscan(df_pulang, 'cluster_pulang')
-
-    log['step7_clusters_masuk']  = int(df_masuk['cluster_masuk'].nunique()  - (1 if -1 in df_masuk['cluster_masuk'].values  else 0))
-    log['step7_noise_masuk']     = int((df_masuk['cluster_masuk']  == -1).sum())
-    log['step7_clusters_pulang'] = int(df_pulang['cluster_pulang'].nunique() - (1 if -1 in df_pulang['cluster_pulang'].values else 0))
-    log['step7_noise_pulang']    = int((df_pulang['cluster_pulang'] == -1).sum())
-
-    # ── STEP 8: ESTIMASI KANTOR PER SKPD ────────────────────
-    df_clustered = df_masuk[df_masuk['cluster_masuk'] != -1].copy()
-    if len(df_clustered) > 0:
-        cluster_size = (
-            df_clustered.groupby(['id_skpd','cluster_masuk'])
-            .size().reset_index(name='n')
-        )
-        idx = cluster_size.groupby('id_skpd')['n'].idxmax()
-        main_cluster = cluster_size.loc[idx]
-        df_office = df_clustered.merge(
-            main_cluster[['id_skpd','cluster_masuk']],
-            on=['id_skpd','cluster_masuk'], how='inner'
-        )
-        office_centroid = (
-            df_office.groupby('id_skpd')[['lat','long']].mean()
-            .reset_index()
-            .rename(columns={'lat':'office_lat','long':'office_long'})
-        )
-    else:
-        # Fallback: median per SKPD
-        office_centroid = (
-            df_masuk.groupby('id_skpd')[['lat','long']].median()
-            .reset_index()
-            .rename(columns={'lat':'office_lat','long':'office_long'})
-        )
-    log['step8_offices'] = len(office_centroid)
-
-    # ── STEP 9: MERGE & HAVERSINE DISTANCE ──────────────────
-    df_model = df.merge(office_centroid, on='id_skpd', how='left')
-    df_model['dist_km'] = haversine_vectorized(
-        df_model['lat'].values, df_model['long'].values,
-        df_model['office_lat'].fillna(df_model['lat']).values,
-        df_model['office_long'].fillna(df_model['long']).values
-    )
-    df_model['outside_300m'] = (df_model['dist_km'] > 0.3).astype(int)
-    df_model['very_far']     = (df_model['dist_km'] > 5.0).astype(int)
-    df_model['extreme_far']  = (df_model['dist_km'] > 50.0).astype(int)
-
-    # ── STEP 10: VALIDATION LOGIC ───────────────────────────
-    df_model['no_note']          = df_model['catatan'].isna().astype(int)
-    df_model['far_no_note']      = ((df_model['outside_300m']==1) & (df_model['no_note']==1)).astype(int)
-    df_model['far_with_note']    = ((df_model['outside_300m']==1) & (df_model['no_note']==0)).astype(int)
-    if 'status_lokasi' in df_model.columns:
-        df_model['near_but_status0'] = ((df_model['outside_300m']==0) & (df_model['status_lokasi']==0)).astype(int)
-        df_model['far_but_status1']  = ((df_model['outside_300m']==1) & (df_model['status_lokasi']==1)).astype(int)
-    else:
-        df_model['near_but_status0'] = 0
-        df_model['far_but_status1']  = 0
-
-    # ── STEP 11: MERGE CLUSTER MASUK & PULANG ───────────────
-    cluster_masuk_map  = df_masuk[['karyawan_id','tanggal_kirim','cluster_masuk']].copy()
-    cluster_pulang_map = df_pulang[['karyawan_id','tanggal_kirim','cluster_pulang']].copy()
-    df_model = df_model.merge(cluster_masuk_map,  on=['karyawan_id','tanggal_kirim'], how='left')
-    df_model = df_model.merge(cluster_pulang_map, on=['karyawan_id','tanggal_kirim'], how='left')
-
-    df_model['is_noise_masuk']  = ((df_model['jenis']=='M') & (df_model['cluster_masuk']==-1)).astype(int)
-    df_model['is_noise_pulang'] = ((df_model['jenis']=='P') & (df_model['cluster_pulang']==-1)).astype(int)
-
-    size_masuk  = df_masuk['cluster_masuk'].value_counts()
-    size_pulang = df_pulang['cluster_pulang'].value_counts()
-    df_model['cluster_size_masuk']  = df_model['cluster_masuk'].map(size_masuk).fillna(0).astype(int)
-    df_model['cluster_size_pulang'] = df_model['cluster_pulang'].map(size_pulang).fillna(0).astype(int)
-
-    # ── STEP 12: ST-DBSCAN ──────────────────────────────────
-    eps_space_km  = params.get('st_eps_km', 0.2)
-    eps_space_rad = eps_space_km / 6371.0
-    st_min        = params.get('st_min_samples', 15)
-    eps_time_h    = params.get('st_eps_hours', 0.5)
-    time_scale    = eps_space_rad / eps_time_h
-
-    def run_st_dbscan(subset, label_col):
-        if len(subset) < st_min:
-            subset[label_col] = -1
-            return subset
-        space = subset[['lat_rad','long_rad']].to_numpy()
-        time  = subset[['jam_desimal']].to_numpy() * time_scale
-        X     = np.hstack([space, time])
-        labels = DBSCAN(eps=eps_space_rad, min_samples=st_min, metric='euclidean').fit_predict(X)
-        subset[label_col] = labels
-        return subset
-
-    df_st_masuk  = df_model[df_model['jenis']=='M'].copy()
-    df_st_pulang = df_model[df_model['jenis']=='P'].copy()
-    df_st_masuk  = run_st_dbscan(df_st_masuk,  'st_cluster_masuk')
-    df_st_pulang = run_st_dbscan(df_st_pulang, 'st_cluster_pulang')
-
-    st_masuk_map  = df_st_masuk[['karyawan_id','tanggal_kirim','st_cluster_masuk']].copy()
-    st_pulang_map = df_st_pulang[['karyawan_id','tanggal_kirim','st_cluster_pulang']].copy()
-    df_model = df_model.merge(st_masuk_map,  on=['karyawan_id','tanggal_kirim'], how='left')
-    df_model = df_model.merge(st_pulang_map, on=['karyawan_id','tanggal_kirim'], how='left')
-
-    df_model['is_st_noise_masuk']  = ((df_model['jenis']=='M') & (df_model['st_cluster_masuk']==-1)).astype(int)
-    df_model['is_st_noise_pulang'] = ((df_model['jenis']=='P') & (df_model['st_cluster_pulang']==-1)).astype(int)
-
-    log['step12_st_noise_masuk']  = int(df_model['is_st_noise_masuk'].sum())
-    log['step12_st_noise_pulang'] = int(df_model['is_st_noise_pulang'].sum())
-
-    # ── STEP 13: ANOMALY SCORING ────────────────────────────
-    df_model['anomaly_score'] = (
-        df_model['outside_300m']      * 25 +
-        df_model['far_no_note']       * 35 +
-        df_model['very_far']          * 30 +
-        df_model['extreme_far']       * 50 +
-        df_model['near_but_status0']  *  5 +
-        df_model['is_noise_masuk']    * 15 +
-        df_model['is_noise_pulang']   * 10 +
-        df_model['is_st_noise_masuk'] * 10
-    )
-
-    def risk_level(s):
-        if s >= 70:   return 'HIGH'
-        elif s >= 30: return 'MED'
-        else:         return 'LOW'
-
-    df_model['risk_level'] = df_model['anomaly_score'].apply(risk_level)
-
-    def system_action(risk):
-        if risk == 'LOW':  return 'AUTO APPROVE'
-        elif risk == 'MED': return 'HOLD (Perlu Review)'
-        else:               return 'TEMP REJECT + NOTIF APPROVER'
-
-    df_model['system_action'] = df_model['risk_level'].apply(system_action)
-
-    log['step13_high'] = int((df_model['risk_level']=='HIGH').sum())
-    log['step13_med']  = int((df_model['risk_level']=='MED').sum())
-    log['step13_low']  = int((df_model['risk_level']=='LOW').sum())
-    log['step13_total'] = len(df_model)
-
-    # Simpan office_centroid di log untuk peta
-    log['office_centroid'] = office_centroid
-
-    return df_model, log
-
-
-# ============================================================
-# HELPER FUNCTIONS
-# ============================================================
-
-def get_risk_color_folium(risk):
-    return {'HIGH':'red','MED':'orange','LOW':'green'}.get(risk,'blue')
-
-def get_risk_color_hex(risk):
-    return {'HIGH':'#e74c3c','MED':'#f39c12','LOW':'#27ae60'}.get(risk,'#3498db')
-
-def build_popup(row):
-    risk  = row.get('risk_level','N/A')
-    color = get_risk_color_hex(risk)
-    dist  = row.get('dist_km', 0)
-    score = row.get('anomaly_score', 0)
-    action = row.get('system_action', '-')
-    catatan = row.get('catatan', '-')
-    if pd.isna(catatan): catatan = '-'
-    return f"""
-    <div style='font-family:Arial;font-size:12px;min-width:230px'>
-        <h4 style='margin:0 0 8px 0;color:#2c3e50'>📋 Detail Absensi</h4>
-        <table style='width:100%;border-collapse:collapse'>
-            <tr><td><b>Karyawan</b></td><td>{row.get('karyawan_id','N/A')}</td></tr>
-            <tr><td><b>SKPD</b></td><td>{row.get('id_skpd','N/A')}</td></tr>
-            <tr><td><b>Jenis</b></td><td>{'🟢 Masuk' if row.get('jenis')=='M' else '🔴 Pulang'}</td></tr>
-            <tr><td><b>Waktu</b></td><td>{str(row.get('tanggal_kirim','N/A'))[:16]}</td></tr>
-            <tr><td><b>Jarak ke kantor</b></td><td>{dist:.3f} km</td></tr>
-            <tr><td><b>Anomaly Score</b></td><td>{score}</td></tr>
-            <tr><td><b>Risk Level</b></td><td><span style='color:{color};font-weight:bold'>{risk}</span></td></tr>
-            <tr><td><b>Aksi Sistem</b></td><td>{action}</td></tr>
-            <tr><td><b>Catatan</b></td><td>{catatan}</td></tr>
-        </table>
-    </div>"""
-
-
-def create_folium_map(df, map_type='marker', office_centroid=None):
-    # NOTE: Tidak menggunakan @st.cache_data karena folium.Map tidak bisa di-serialize
-    center_lat  = df['lat'].median()
-    center_long = df['long'].median()
-    m = folium.Map(location=[center_lat, center_long], zoom_start=13, tiles='OpenStreetMap')
-    folium.TileLayer('CartoDB positron', name='CartoDB Light').add_to(m)
-
-    if map_type == 'heatmap':
-        heat_data = [[r['lat'], r['long'], r.get('anomaly_score',1)+1] for _, r in df.iterrows()]
-        HeatMap(heat_data, radius=15, blur=10, max_zoom=14).add_to(m)
-    elif map_type == 'cluster':
-        mc = MarkerCluster(name='Absensi').add_to(m)
-        for _, row in df.iterrows():
-            color = get_risk_color_folium(row.get('risk_level','LOW'))
-            folium.CircleMarker(
-                location=[row['lat'], row['long']], radius=7,
-                color=color, fill=True, fill_color=color, fill_opacity=0.75,
-                popup=folium.Popup(build_popup(row), max_width=280)
-            ).add_to(mc)
-    else:
-        for risk in ['HIGH','MED','LOW']:
-            fg = folium.FeatureGroup(name=f'Risk {risk}')
-            color = get_risk_color_folium(risk)
-            for _, row in df[df['risk_level']==risk].iterrows():
-                folium.CircleMarker(
-                    location=[row['lat'], row['long']],
-                    radius=8 if risk=='HIGH' else 6,
-                    color=color, fill=True, fill_color=color, fill_opacity=0.7,
-                    popup=folium.Popup(build_popup(row), max_width=280)
-                ).add_to(fg)
-            fg.add_to(m)
-
-    # Marker kantor
-    if office_centroid is not None and len(office_centroid) > 0:
-        fg_office = folium.FeatureGroup(name='Kantor SKPD')
-        for _, row in office_centroid.iterrows():
-            if pd.notna(row['office_lat']):
-                folium.Marker(
-                    location=[row['office_lat'], row['office_long']],
-                    popup=f"<b>Kantor SKPD {row['id_skpd']}</b>",
-                    icon=folium.Icon(color='blue', icon='home', prefix='fa')
-                ).add_to(fg_office)
-                folium.Circle(
-                    location=[row['office_lat'], row['office_long']],
-                    radius=300, color='blue', fill=False, weight=2, dash_array='5'
-                ).add_to(fg_office)
-        fg_office.add_to(m)
-
-    folium.LayerControl().add_to(m)
-    return m
-
-
-def create_pydeck_map(df):
-    """
-    Buat peta 3D PyDeck.
-    Warna disimpan sebagai string hex agar kompatibel dengan semua versi PyDeck.
-    """
-    color_map = {'HIGH':'[231,76,60,200]','MED':'[243,156,18,200]','LOW':'[39,174,96,200]'}
-    DEFAULT_COLOR_STR = '[52,152,219,200]'
-
-    df_map = df[['karyawan_id','id_skpd','lat','long','risk_level','anomaly_score','dist_km']].copy()
-    df_map['anomaly_score'] = df_map['anomaly_score'].fillna(0).astype(int)
-    df_map['dist_km']       = df_map['dist_km'].fillna(0).round(3)
-    df_map['radius']        = (df_map['anomaly_score'] * 10 + 20).astype(int)
-
-    # Konversi warna ke list integer (bukan string) agar PyDeck bisa serialize
-    def to_color(risk):
-        m = {'HIGH':[231,76,60,200],'MED':[243,156,18,200],'LOW':[39,174,96,200]}
-        return m.get(risk, [52,152,219,200])
-
-    df_map['r'] = df_map['risk_level'].apply(lambda x: to_color(x)[0])
-    df_map['g'] = df_map['risk_level'].apply(lambda x: to_color(x)[1])
-    df_map['b'] = df_map['risk_level'].apply(lambda x: to_color(x)[2])
-    df_map['a'] = 200
-
-    scatter = pdk.Layer(
-        'ScatterplotLayer',
-        data=df_map,
-        get_position='[long, lat]',
-        get_fill_color='[r, g, b, a]',
-        get_radius='radius',
-        pickable=True,
-        opacity=0.8,
-        stroked=False,
-        filled=True,
-        radius_scale=6,
-        radius_min_pixels=4,
-        radius_max_pixels=30
-    )
-    view = pdk.ViewState(
-        latitude=float(df['lat'].median()),
-        longitude=float(df['long'].median()),
-        zoom=12, pitch=40, bearing=0
-    )
-    return pdk.Deck(
-        layers=[scatter],
-        initial_view_state=view,
-        tooltip={
-            'html': '<b>Karyawan:</b> {karyawan_id}<br><b>Risk:</b> {risk_level}<br>'
-                    '<b>Score:</b> {anomaly_score}<br><b>Jarak:</b> {dist_km} km',
-            'style': {'backgroundColor':'steelblue','color':'white'}
-        }
-    )
-
-
 @st.cache_data(show_spinner=False)
-def apply_filters(df, selected_skpd, risk_options, jenis_options, date_range, dist_range):
-    """Cache hasil filter — tidak dihitung ulang jika parameter sama."""
+def apply_filters(df_hash, df, skpd, risk_tuple, jenis_tuple, date_range, dist_range, approver_filter):
     f = df.copy()
-    if selected_skpd != 'Semua':
-        f = f[f['id_skpd'] == selected_skpd]
-    if risk_options:
-        f = f[f['risk_level'].isin(list(risk_options))]
-    if jenis_options:
-        f = f[f['jenis'].isin(list(jenis_options))]
+    if skpd != 'Semua':
+        f = f[f['id_skpd'] == skpd]
+    if risk_tuple:
+        f = f[f['risk_level'].isin(list(risk_tuple))]
+    if jenis_tuple:
+        f = f[f['jenis'].isin(list(jenis_tuple))]
     if date_range and len(date_range) == 2 and 'tanggal_kirim' in f.columns:
-        f = f[(f['tanggal_kirim'].dt.date >= date_range[0]) & (f['tanggal_kirim'].dt.date <= date_range[1])]
+        f = f[(f['tanggal_kirim'].dt.date >= date_range[0]) &
+              (f['tanggal_kirim'].dt.date <= date_range[1])]
     if 'dist_km' in f.columns:
         f = f[(f['dist_km'] >= dist_range[0]) & (f['dist_km'] <= dist_range[1])]
+    if approver_filter and 'approver_status' in f.columns:
+        if approver_filter == 'TOLAK':
+            f = f[f['is_tolak'] == 1]
+        elif approver_filter == 'TERIMA':
+            f = f[f['is_terima'] == 1]
+        elif approver_filter == 'PENDING':
+            f = f[f['is_pending'] == 1]
+        elif approver_filter == 'False Negative':
+            f = f[f['false_negative'] == 1]
     return f
-
 
 # ============================================================
 # SIDEBAR
 # ============================================================
-
 def render_sidebar():
     st.sidebar.markdown("## 🗺️ Deteksi Anomali Absensi")
     st.sidebar.markdown("---")
 
-    # ── NAVIGASI ──────────────────────────────────────────
     page = st.sidebar.radio(
         "📌 Navigasi",
-        options=["🏠 Beranda", "📥 Upload & Preprocessing", "📊 Visualisasi", "🔮 Prediksi"],
+        ["🏠 Beranda", "📥 Upload Data", "📊 Visualisasi", "🎯 Hunting", "🔮 Prediksi"],
         index=0
     )
-
     st.sidebar.markdown("---")
 
-    # ── UPLOAD FILE ───────────────────────────────────────
-    st.sidebar.markdown("### 📂 Upload Data")
+    st.sidebar.markdown("### 📂 Upload Data (sudah diproses)")
     uploaded = st.sidebar.file_uploader(
-        "Upload file absensi (CSV/Excel)",
+        "Upload CSV / Excel hasil preprocessing",
         type=['csv','xlsx'],
-        help="Upload file absen_pegawai.xlsx atau hasil preprocessing"
+        help="Upload file absensi yang sudah memiliki kolom risk_level, dist_km, dll."
     )
 
-    # ── PARAMETER PREPROCESSING ───────────────────────────
-    with st.sidebar.expander("⚙️ Parameter Preprocessing", expanded=False):
-        eps_km      = st.slider("DBSCAN Radius (km)",      0.05, 1.0, 0.2, 0.05)
-        min_samples = st.slider("DBSCAN Min Samples",       5, 50, 20, 5)
-        st_eps_km   = st.slider("ST-DBSCAN Radius (km)",   0.05, 1.0, 0.2, 0.05)
-        st_min      = st.slider("ST-DBSCAN Min Samples",    5, 50, 15, 5)
-        st_eps_h    = st.slider("ST-DBSCAN Waktu (jam)",   0.1, 2.0, 0.5, 0.1)
-
-    params = {
-        'eps_km': eps_km, 'min_samples': min_samples,
-        'st_eps_km': st_eps_km, 'st_min_samples': st_min, 'st_eps_hours': st_eps_h
-    }
-
-    # ── FILTER (hanya tampil di halaman Visualisasi) ───────
     filters = {}
-    if 'df_result' in st.session_state and st.session_state.df_result is not None:
-        df = st.session_state.df_result
+    if 'df' in st.session_state and st.session_state.df is not None:
+        df = st.session_state.df
         with st.sidebar.expander("🔍 Filter Data", expanded=True):
             skpd_list = ['Semua'] + sorted(df['id_skpd'].unique().tolist())
             filters['skpd']   = st.selectbox("SKPD", skpd_list)
-            filters['risk']   = st.multiselect("Risk Level", ['HIGH','MED','LOW'], default=['HIGH','MED','LOW'])
+            filters['risk']   = st.multiselect("Risk Level", ['HIGH','MED','LOW'],
+                                               default=['HIGH','MED','LOW'])
             filters['jenis']  = st.multiselect("Jenis", ['M','P'], default=['M','P'],
                                                format_func=lambda x: 'Masuk' if x=='M' else 'Pulang')
             if 'tanggal_kirim' in df.columns:
                 min_d = df['tanggal_kirim'].min().date()
                 max_d = df['tanggal_kirim'].max().date()
-                filters['date'] = st.date_input("Rentang Tanggal", value=(min_d, max_d),
+                filters['date'] = st.date_input("Rentang Tanggal",
+                                                value=(min_d, max_d),
                                                 min_value=min_d, max_value=max_d)
             else:
                 filters['date'] = None
             max_dist = float(df['dist_km'].max()) if 'dist_km' in df.columns else 100.0
-            filters['dist'] = st.slider("Jarak ke Kantor (km)", 0.0, min(max_dist,100.0),
-                                        (0.0, min(max_dist,100.0)), 0.1)
+            filters['dist'] = st.slider("Jarak ke Kantor (km)", 0.0,
+                                        min(max_dist, 100.0),
+                                        (0.0, min(max_dist, 100.0)), 0.1)
+            if 'approver_status' in df.columns:
+                filters['approver'] = st.selectbox(
+                    "Approver Status",
+                    ['Semua','TERIMA','TOLAK','PENDING','False Negative'],
+                    help="False Negative = TERIMA tapi HIGH risk"
+                )
+            else:
+                filters['approver'] = 'Semua'
 
         with st.sidebar.expander("🗺️ Pengaturan Peta", expanded=False):
-            filters['map_type']  = st.radio("Tipe Peta", ['marker','cluster','heatmap'],
-                                            format_func=lambda x: {'marker':'📍 Marker','cluster':'🔵 Cluster','heatmap':'🔥 Heatmap'}[x])
-            filters['use_pydeck'] = st.checkbox("Peta 3D (PyDeck)", value=False)
+            filters['map_type'] = st.radio(
+                "Tipe Peta",
+                ['marker','cluster','heatmap'],
+                format_func=lambda x: {'marker':'📍 Marker','cluster':'🔵 Cluster','heatmap':'🔥 Heatmap'}[x]
+            )
 
-    return page, uploaded, params, filters
+        # Watchlist
+        wl = st.session_state.get('watchlist', [])
+        if wl:
+            st.sidebar.markdown("---")
+            st.sidebar.markdown("### 👁️ Watchlist")
+            for emp_id in wl:
+                ed = df[df['karyawan_id'] == emp_id]
+                nh = (ed['risk_level']=='HIGH').sum() if not ed.empty else 0
+                st.sidebar.markdown(f"""
+                <div class='watchlist-item'>
+                    <span>🔴</span><span><b>ID {emp_id}</b> — {nh} HIGH</span>
+                </div>""", unsafe_allow_html=True)
+            if st.sidebar.button("🗑️ Clear Watchlist"):
+                st.session_state['watchlist'] = []
+                st.rerun()
 
+    return page, uploaded, filters
 
 # ============================================================
 # PAGE: BERANDA
 # ============================================================
-
 def page_beranda():
     st.markdown('<div class="main-header">🗺️ Deteksi Anomali Absensi Pegawai</div>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Sistem deteksi anomali lokasi absensi menggunakan DBSCAN, ST-DBSCAN, dan Haversine Distance</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Upload data yang sudah diproses → langsung visualisasi & investigasi</p>', unsafe_allow_html=True)
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.info("### 📥 Step 1\n**Upload & Preprocessing**\nUpload file absensi Anda, sistem akan otomatis melakukan preprocessing lengkap.")
-    with col2:
-        st.success("### 📊 Step 2\n**Visualisasi**\nLihat peta interaktif, analisis temporal, distribusi jarak, dan statistik anomali.")
-    with col3:
-        st.warning("### 🔮 Step 3\n**Prediksi**\nUpload data baru untuk diprediksi apakah termasuk anomali atau tidak.")
+    col1, col2, col3, col4 = st.columns(4)
+    with col1: st.info("### 📥 Step 1\n**Upload Data**\nUpload file Excel/CSV hasil preprocessing.")
+    with col2: st.success("### 📊 Step 2\n**Visualisasi**\nPeta, temporal, jarak, distribusi risk.")
+    with col3: st.warning("### 🎯 Step 3\n**Hunting**\nInvestigasi mendalam per pegawai, SKPD, atau tanggal.")
+    with col4: st.error("### 🔮 Step 4\n**Prediksi**\nSkor absensi baru berdasarkan referensi kantor.")
 
     st.markdown("---")
-    st.markdown("### 🔄 Alur Pipeline")
+    st.markdown("### 📋 Kolom yang Dibutuhkan")
+    cols_info = pd.DataFrame([
+        ['karyawan_id','integer','ID pegawai','Wajib'],
+        ['id_skpd','integer','ID kantor/SKPD','Wajib'],
+        ['lat / long','float','Koordinat absensi','Wajib'],
+        ['tanggal_kirim','datetime','Waktu absensi','Wajib'],
+        ['jenis','M / P','Masuk atau Pulang','Wajib'],
+        ['risk_level','LOW/MED/HIGH','Output anomali','Wajib'],
+        ['anomaly_score','integer','Skor risiko','Wajib'],
+        ['dist_km','float','Jarak ke kantor (km)','Wajib'],
+        ['approver_status','TERIMA/TOLAK','Keputusan atasan','Opsional'],
+        ['catatan','string','Alasan tugas luar','Opsional'],
+        ['office_lat/long','float','Koordinat kantor SKPD','Opsional'],
+    ], columns=['Kolom','Tipe/Value','Keterangan','Status'])
+    st.dataframe(cols_info, use_container_width=True, hide_index=True)
 
-    pipeline_steps = [
-        ("1️⃣ Data Selection",       "Pilih kolom yang relevan: karyawan_id, lat, long, tanggal_kirim, jenis, id_skpd, catatan, status_lokasi"),
-        ("2️⃣ Data Profiling",        "Cek null values, koordinat error, duplikat absensi — laporan kesehatan data"),
-        ("3️⃣ Data Cleaning",         "Drop koordinat kosong/invalid, buang (0,0), hapus duplikat, validasi jarak numerik"),
-        ("4️⃣ Time Transformation",   "Ekstrak jam, menit, jam_desimal, weekday, timestamp_num dari tanggal_kirim"),
-        ("5️⃣ Coordinate Transform",  "Konversi lat/long ke radian untuk DBSCAN metric haversine"),
-        ("6️⃣ Split Masuk/Pulang",    "Pisahkan data M (Masuk) dan P (Pulang) untuk clustering terpisah"),
-        ("7️⃣ DBSCAN Spatial",        "Clustering lokasi per jenis absensi — temukan hotspot dan noise"),
-        ("8️⃣ Estimasi Kantor",       "Ambil cluster terbesar per SKPD → hitung centroid sebagai lokasi kantor"),
-        ("9️⃣ Haversine Distance",    "Hitung jarak setiap absensi ke kantor SKPD-nya (km)"),
-        ("🔟 Validation Logic",      "Flag: outside_300m, far_no_note, far_with_note, near_but_status0"),
-        ("1️⃣1️⃣ ST-DBSCAN",          "Clustering spatio-temporal — deteksi pola tidak konsisten waktu+lokasi"),
-        ("1️⃣2️⃣ Anomaly Scoring",    "Hitung skor risiko dari kombinasi semua sinyal anomali"),
-        ("1️⃣3️⃣ Risk Level",         "Klasifikasi: LOW (0-29) | MED (30-69) | HIGH (≥70)"),
-    ]
-
-    for title, desc in pipeline_steps:
-        st.markdown(f"""
-        <div class="step-box">
-            <div class="step-title">{title}</div>
-            <div class="step-desc">{desc}</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    st.markdown("---")
-    st.markdown("### 📊 Anomaly Scoring Formula")
-    score_data = {
-        'Sinyal': ['outside_300m (>300m)', 'far_no_note (jauh+tanpa alasan)', 'very_far (>5km)',
-                   'extreme_far (>50km)', 'near_but_status0 (mismatch)', 'is_noise_masuk (DBSCAN noise)',
-                   'is_noise_pulang', 'is_st_noise_masuk (ST-DBSCAN noise)'],
-        'Bobot': [25, 35, 30, 50, 5, 15, 10, 10],
-        'Keterangan': [
-            'Di luar radius 300m dari kantor',
-            'Jauh dari kantor + tidak ada catatan alasan',
-            'Sangat jauh (>5km)',
-            'Ekstrem jauh >50km — indikasi fake GPS',
-            'Dekat tapi sistem lama bilang di luar',
-            'Tidak masuk cluster lokasi manapun',
-            'Tidak masuk cluster pulang manapun',
-            'Tidak konsisten secara ruang-waktu'
-        ]
-    }
-    st.dataframe(pd.DataFrame(score_data), use_container_width=True, hide_index=True)
-
-    st.markdown("""
-    | Score | Risk Level | Aksi Sistem |
-    |---|---|---|
-    | 0 – 29 | 🟢 LOW | AUTO APPROVE |
-    | 30 – 69 | 🟡 MED | HOLD (Perlu Review) |
-    | ≥ 70 | 🔴 HIGH | TEMP REJECT + NOTIF APPROVER |
-    """)
-
+    st.info("💡 **Separator desimal koma** (format Excel Indonesia) **otomatis dikonversi** saat upload — tidak perlu ubah manual.")
 
 # ============================================================
-# PAGE: UPLOAD & PREPROCESSING
+# LOCAL FILE SCANNER
 # ============================================================
+CANDIDATE_FILES = [
+    'dataset_absensi_final2.xlsx',
+    'absen_pegawai.xlsx',
+    'absensi.xlsx',
+    'absensi_processed.xlsx',
+    'absensi_processed.csv',
+    'absensi.csv',
+    'data_absensi.xlsx',
+    'data_absensi.csv',
+]
 
-def page_preprocessing(uploaded, params):
-    st.markdown("## 📥 Upload & Preprocessing")
+def scan_local_files():
+    """Cari file dataset di folder yang sama dengan script."""
+    import os
+    found = []
+    # Cek CANDIDATE_FILES dulu (prioritas)
+    for fname in CANDIDATE_FILES:
+        if os.path.exists(fname):
+            found.append(fname)
+    # Tambah semua xlsx/csv lain yang ada di folder
+    for fname in sorted(os.listdir('.')):
+        if fname.endswith(('.xlsx','.csv')) and fname not in found:
+            found.append(fname)
+    return found
 
-    if uploaded is None:
-        # Coba load dari file lokal
-        if os.path.exists('absen_pegawai.xlsx'):
-            st.info("📂 Menggunakan file `absen_pegawai.xlsx` yang ditemukan di folder.")
-            with open('absen_pegawai.xlsx','rb') as f:
-                file_bytes = f.read()
-            df_raw = _load_file_cached(file_bytes, 'absen_pegawai.xlsx')
-        elif os.path.exists('dataset_absensi_final2.xlsx'):
-            st.info("📂 Menggunakan file `dataset_absensi_final2.xlsx` yang ditemukan di folder.")
-            with open('dataset_absensi_final2.xlsx','rb') as f:
-                file_bytes = f.read()
-            df_raw = _load_file_cached(file_bytes, 'dataset_absensi_final2.xlsx')
-        else:
-            st.warning("⬆️ Silakan upload file absensi melalui sidebar kiri (CSV atau Excel).")
-            st.markdown("""
-            **Format kolom yang dibutuhkan:**
-            | Kolom | Tipe | Keterangan |
-            |---|---|---|
-            | karyawan_id | integer | ID pegawai |
-            | id_skpd | integer | ID kantor/SKPD |
-            | lat | float | Latitude absensi |
-            | long | float | Longitude absensi |
-            | tanggal_kirim | datetime | Waktu absensi |
-            | jenis | string | M=Masuk, P=Pulang |
-            | status_lokasi | integer | 1=dalam, 0=luar |
-            | catatan | string | Alasan tugas luar |
-            """)
+@st.cache_data(show_spinner=False)
+def load_local_file(filepath: str):
+    """Load file lokal dari path, dengan cache."""
+    with open(filepath, 'rb') as f:
+        file_bytes = f.read()
+    fname = filepath.split('/')[-1].split('\\')[-1]
+    return load_processed_file(file_bytes, fname)
+
+# ============================================================
+# PAGE: UPLOAD
+# ============================================================
+def page_upload(uploaded):
+    st.markdown("## 📥 Upload Data Absensi")
+
+    # ── DETEKSI FILE LOKAL ────────────────────────────────────
+    local_files = scan_local_files()
+    file_bytes  = None
+    file_name   = None
+
+    if local_files:
+        st.success(f"📂 **{len(local_files)} file ditemukan** di folder yang sama dengan app ini.")
+        col_sel, col_load = st.columns([4, 1])
+        with col_sel:
+            chosen_local = st.selectbox(
+                "Pilih file lokal",
+                options=local_files,
+                key='local_file_select'
+            )
+        with col_load:
+            st.markdown("<br>", unsafe_allow_html=True)
+            load_local = st.button("📂 Load", type="primary", use_container_width=True,
+                                   key='btn_load_local')
+        if load_local:
+            with st.spinner(f"⏳ Memuat {chosen_local}..."):
+                df, fixed_cols = load_local_file(chosen_local)
+            _finalize_load(df, fixed_cols, chosen_local)
             return
-    else:
-        # Cache berdasarkan konten file (bukan nama) — aman untuk re-upload
-        file_bytes = uploaded.getvalue()
-        df_raw = _load_file_cached(file_bytes, uploaded.name)
 
-    st.success(f"✅ File berhasil dimuat: **{len(df_raw):,} baris**, **{len(df_raw.columns)} kolom**")
+        st.markdown("---")
 
-    # ── PROFILING AWAL ─────────────────────────────────────
-    with st.expander("🔍 Data Profiling (Sebelum Cleaning)", expanded=True):
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Total Baris", f"{len(df_raw):,}")
-        with col2:
-            st.metric("Total Kolom", len(df_raw.columns))
-        with col3:
-            null_total = df_raw.isnull().sum().sum()
-            st.metric("Total Null Values", f"{null_total:,}")
+    # ── UPLOAD MANUAL ─────────────────────────────────────────
+    if uploaded is None:
+        if not local_files:
+            st.warning("⬆️ Tidak ada file ditemukan di folder ini. Silakan upload melalui sidebar.")
+        else:
+            st.info("💡 Atau upload file lain dari komputer kamu:")
+        return
 
-        st.markdown("**Kolom & Tipe Data:**")
+    file_bytes = uploaded.getvalue()
+    with st.spinner("⏳ Memuat dan memvalidasi data..."):
+        df, fixed_cols = load_processed_file(file_bytes, uploaded.name)
+    _finalize_load(df, fixed_cols, uploaded.name)
+
+def _finalize_load(df, fixed_cols, source_name):
+    """Tampilkan info & konfirmasi penggunaan data."""
+
+    st.success(f"✅ **{source_name}** berhasil dimuat: **{len(df):,} baris**, **{len(df.columns)} kolom**")
+
+    if fixed_cols:
+        st.info(f"🔧 Auto-fix separator desimal pada kolom: `{'`, `'.join(fixed_cols)}`")
+
+    warns = validate_dataframe(df)
+    for w in warns:
+        st.warning(f"⚠️ {w}")
+
+    # Profiling
+    col1, col2, col3, col4 = st.columns(4)
+    with col1: st.metric("Total Baris", f"{len(df):,}")
+    with col2: st.metric("Karyawan Unik", f"{df['karyawan_id'].nunique():,}")
+    with col3: st.metric("SKPD", f"{df['id_skpd'].nunique():,}" if 'id_skpd' in df.columns else '-')
+    with col4:
+        if 'risk_level' in df.columns:
+            n_high = (df['risk_level']=='HIGH').sum()
+            st.metric("HIGH Risk", f"{n_high:,} ({n_high/len(df)*100:.1f}%)")
+
+    # Approver overview
+    if 'approver_status' in df.columns:
+        st.markdown("#### 📋 Overview Approver Status")
+        c1, c2, c3, c4 = st.columns(4)
+        with c1: st.metric("✅ TERIMA", f"{df['is_terima'].sum():,}")
+        with c2: st.metric("❌ TOLAK",  f"{df['is_tolak'].sum():,}")
+        with c3: st.metric("⏳ PENDING", f"{df['is_pending'].sum():,}")
+        with c4:
+            fn = df['false_negative'].sum()
+            st.metric("🚨 False Negative", f"{fn:,}",
+                      help="TERIMA oleh approver tapi sistem menilai HIGH risk")
+
+    with st.expander("🔍 Sample Data (10 baris pertama)", expanded=False):
+        st.dataframe(df.head(10), use_container_width=True)
+
+    with st.expander("📊 Info Kolom", expanded=False):
         dtype_df = pd.DataFrame({
-            'Kolom': df_raw.dtypes.index,
-            'Tipe': df_raw.dtypes.values.astype(str),
-            'Null': df_raw.isnull().sum().values,
-            'Null %': (df_raw.isnull().sum().values / len(df_raw) * 100).round(2)
+            'Kolom': df.dtypes.index,
+            'Tipe': df.dtypes.values.astype(str),
+            'Null': df.isnull().sum().values,
+            'Null%': (df.isnull().sum().values/len(df)*100).round(1)
         })
         st.dataframe(dtype_df, use_container_width=True, hide_index=True)
 
-        st.markdown("**Sample Data (5 baris pertama):**")
-        st.dataframe(df_raw.head(), use_container_width=True)
+    if st.button("✅ Gunakan Data Ini", type="primary", use_container_width=True):
+        st.session_state['df'] = df
+        st.session_state['office_centroid'] = build_office_centroid(df)
+        st.session_state['file_name'] = uploaded.name
+        st.success("✅ Data siap digunakan! Pilih menu **📊 Visualisasi** atau **🎯 Hunting**.")
+        st.rerun()
 
-    # ── JALANKAN PIPELINE ──────────────────────────────────
-    st.markdown("---")
-    st.markdown("### ⚙️ Jalankan Preprocessing Pipeline")
-    st.markdown("Klik tombol di bawah untuk menjalankan semua tahap preprocessing secara otomatis.")
+# ============================================================
+# PETA FOLIUM HELPER
+# ============================================================
+def build_popup(row):
+    risk  = row.get('risk_level','N/A')
+    color = risk_color_hex(risk)
+    dist  = row.get('dist_km', 0)
+    score = row.get('anomaly_score', 0)
+    app_s = row.get('approver_status', '-') or '-'
+    cat   = row.get('catatan', '-') or '-'
+    fn    = row.get('false_negative', 0)
+    fn_html = "<tr><td colspan=2><b style='color:#e74c3c'>⚠️ FALSE NEGATIVE — Approver kecolongan!</b></td></tr>" if fn else ""
+    return f"""
+    <div style='font-family:Arial;font-size:12px;min-width:240px'>
+      <h4 style='margin:0 0 8px;color:#2c3e50'>📋 Detail Absensi</h4>
+      <table style='width:100%;border-collapse:collapse'>
+        <tr><td><b>Karyawan</b></td><td>{row.get('karyawan_id','')}</td></tr>
+        <tr><td><b>SKPD</b></td><td>{row.get('id_skpd','')}</td></tr>
+        <tr><td><b>Jenis</b></td><td>{'🟢 Masuk' if row.get('jenis')=='M' else '🔴 Pulang'}</td></tr>
+        <tr><td><b>Waktu</b></td><td>{str(row.get('tanggal_kirim',''))[:16]}</td></tr>
+        <tr><td><b>Jarak ke kantor</b></td><td>{dist:.3f} km</td></tr>
+        <tr><td><b>Anomaly Score</b></td><td>{score}</td></tr>
+        <tr><td><b>Risk Level</b></td><td><b style='color:{color}'>{risk}</b></td></tr>
+        <tr><td><b>Approver</b></td><td>{app_s}</td></tr>
+        <tr><td><b>Catatan</b></td><td>{cat}</td></tr>
+        {fn_html}
+      </table>
+    </div>"""
 
-    # Cek apakah sudah ada hasil preprocessing dengan params yang sama
-    df_hash_key    = _df_hash(df_raw)
-    params_key     = str(sorted(params.items()))
-    already_done   = (
-        st.session_state.get('_last_df_hash') == df_hash_key and
-        st.session_state.get('_last_params_key') == params_key and
-        st.session_state.get('df_result') is not None
-    )
+def create_folium_map(df, map_type='marker', office_centroid=None):
+    center_lat  = df['lat'].median()
+    center_long = df['long'].median()
+    m = folium.Map(location=[center_lat, center_long], zoom_start=13, tiles='CartoDB positron')
+    folium.TileLayer('OpenStreetMap', name='OpenStreetMap').add_to(m)
 
-    if already_done:
-        st.success("✅ Data sudah diproses sebelumnya — hasil tersimpan di cache. Tidak perlu diulang.")
-        st.info("💡 Jika ingin memproses ulang dengan parameter berbeda, ubah parameter di sidebar lalu klik tombol di bawah.")
+    if map_type == 'heatmap':
+        heat = [[r['lat'], r['long'], r.get('anomaly_score',1)+1] for _, r in df.iterrows()]
+        HeatMap(heat, radius=15, blur=10).add_to(m)
+    elif map_type == 'cluster':
+        mc = MarkerCluster(name='Absensi').add_to(m)
+        for _, row in df.iterrows():
+            c = risk_color_folium(row.get('risk_level','LOW'))
+            folium.CircleMarker(
+                location=[row['lat'], row['long']], radius=7,
+                color=c, fill=True, fill_color=c, fill_opacity=0.75,
+                popup=folium.Popup(build_popup(row), max_width=280)
+            ).add_to(mc)
+    else:
+        for risk in ['HIGH','MED','LOW']:
+            fg = folium.FeatureGroup(name=f'Risk {risk}')
+            c  = risk_color_folium(risk)
+            for _, row in df[df['risk_level']==risk].iterrows():
+                # False negative = border kuning
+                ec = 'gold' if row.get('false_negative',0) == 1 else c
+                folium.CircleMarker(
+                    location=[row['lat'], row['long']],
+                    radius=9 if risk=='HIGH' else 6,
+                    color=ec, fill=True, fill_color=c, fill_opacity=0.75,
+                    popup=folium.Popup(build_popup(row), max_width=280)
+                ).add_to(fg)
+            fg.add_to(m)
 
-    if st.button(
-        "🚀 Jalankan Preprocessing" if not already_done else "🔄 Proses Ulang (Parameter Berubah)",
-        type="primary", use_container_width=True
-    ):
-        progress_bar = st.progress(0, text="⏳ Memulai preprocessing...")
-        status_text  = st.empty()
-        try:
-            status_text.info("📋 Step 1-3: Data Selection & Cleaning...")
-            progress_bar.progress(10, text="Step 1-3: Data Selection & Cleaning")
+    if office_centroid is not None and len(office_centroid) > 0:
+        fg_off = folium.FeatureGroup(name='Kantor SKPD')
+        for _, o in office_centroid.iterrows():
+            if pd.notna(o.get('office_lat')):
+                folium.Marker(
+                    [o['office_lat'], o['office_long']],
+                    popup=f"Kantor SKPD {o['id_skpd']}",
+                    icon=folium.Icon(color='blue', icon='home', prefix='fa')
+                ).add_to(fg_off)
+                folium.Circle([o['office_lat'], o['office_long']],
+                              radius=300, color='#3498db', fill=False,
+                              weight=2, dash_array='5').add_to(fg_off)
+        fg_off.add_to(m)
 
-            # Gunakan cached pipeline
-            df_result, log = _run_pipeline_cached(df_hash_key, params_key, df_raw, params)
-
-            progress_bar.progress(40, text="Step 4-6: Time & Coordinate Transform")
-            status_text.info("⏰ Step 4-6: Time & Coordinate Transform...")
-
-            progress_bar.progress(60, text="Step 7-8: DBSCAN & Estimasi Kantor")
-            status_text.info("🔵 Step 7-8: DBSCAN Spatial & Estimasi Kantor...")
-
-            progress_bar.progress(80, text="Step 9-11: Haversine & Validation")
-            status_text.info("📏 Step 9-11: Haversine Distance & Validation...")
-
-            progress_bar.progress(95, text="Step 12-13: ST-DBSCAN & Anomaly Scoring")
-            status_text.info("🟣 Step 12-13: ST-DBSCAN & Anomaly Scoring...")
-
-            # Simpan ke session state
-            st.session_state['df_result']       = df_result
-            st.session_state['log']             = log
-            st.session_state['df_raw']          = df_raw
-            st.session_state['_last_df_hash']   = df_hash_key
-            st.session_state['_last_params_key'] = params_key
-
-            progress_bar.progress(100, text="✅ Selesai!")
-            status_text.success("✅ Preprocessing selesai! Hasil tersimpan di cache — pindah halaman tidak akan menghapus data.")
-        except Exception as e:
-            progress_bar.empty()
-            st.error(f"❌ Error saat preprocessing: {e}")
-            import traceback
-            st.code(traceback.format_exc())
-            return
-
-    # ── TAMPILKAN HASIL ────────────────────────────────────
-    if 'df_result' in st.session_state and st.session_state.df_result is not None:
-        df_result = st.session_state.df_result
-        log       = st.session_state.log
-
-        st.markdown("---")
-        st.markdown("### 📋 Hasil Preprocessing — Step by Step")
-
-        # Step 1
-        with st.expander("✅ Step 1: Data Selection", expanded=False):
-            st.markdown("""
-            <div class="step-box">
-                <div class="step-title">Apa yang dilakukan?</div>
-                <div class="step-desc">Memilih kolom-kolom yang relevan untuk analisis anomali. Kolom tidak relevan dibuang untuk efisiensi.</div>
-            </div>
-            """, unsafe_allow_html=True)
-            st.write(f"**Kolom yang digunakan:** {log.get('step1_cols', [])}")
-            st.write(f"**Jumlah baris:** {log.get('step1_rows', 0):,}")
-
-        # Step 2
-        with st.expander("✅ Step 2: Data Profiling", expanded=False):
-            st.markdown("""
-            <div class="step-box">
-                <div class="step-title">Apa yang dilakukan?</div>
-                <div class="step-desc">Menganalisis kualitas data: null values, koordinat di luar range bumi, dan duplikat absensi.</div>
-            </div>
-            """, unsafe_allow_html=True)
-            null_data = {k: v for k, v in log.get('profile_null', {}).items() if v > 0}
-            if null_data:
-                st.write("**Null Values per Kolom:**")
-                st.dataframe(pd.DataFrame(list(null_data.items()), columns=['Kolom','Null Count']),
-                             use_container_width=True, hide_index=True)
-            else:
-                st.success("Tidak ada null values pada kolom utama.")
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric("Koordinat Error", log.get('profile_coord_error', 0))
-            with col2:
-                st.metric("Duplikat Absensi", log.get('profile_duplicates', 0))
-
-        # Step 3
-        with st.expander("✅ Step 3: Data Cleaning", expanded=False):
-            st.markdown("""
-            <div class="step-box">
-                <div class="step-title">Apa yang dilakukan?</div>
-                <div class="step-desc">
-                    1. Drop baris dengan koordinat kosong (lat/long null)<br>
-                    2. Validasi jarak numerik (kolom jarak jika ada)<br>
-                    3. Filter koordinat di luar range bumi (-90 s/d 90, -180 s/d 180)<br>
-                    4. Buang koordinat (0,0) — GPS tidak valid<br>
-                    5. Hapus duplikat absensi (karyawan_id + tanggal_kirim + jenis)
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Baris Sebelum", f"{log.get('profile_rows_before',0):,}")
-            with col2:
-                st.metric("Baris Setelah", f"{log.get('step3_rows_after',0):,}")
-            with col3:
-                st.metric("Baris Dibuang", f"{log.get('step3_dropped',0):,}",
-                          delta=f"-{log.get('step3_dropped',0)}", delta_color="inverse")
-
-        # Step 4
-        with st.expander("✅ Step 4: Time Transformation", expanded=False):
-            st.markdown("""
-            <div class="step-box">
-                <div class="step-title">Apa yang dilakukan?</div>
-                <div class="step-desc">
-                    Mengekstrak fitur waktu dari kolom tanggal_kirim:<br>
-                    • <b>timestamp_num</b>: detik sejak epoch (untuk analisa lintas hari)<br>
-                    • <b>jam</b>: jam absensi (0-23)<br>
-                    • <b>menit</b>: menit absensi (0-59)<br>
-                    • <b>jam_desimal</b>: jam + menit/60 (contoh: 7:30 → 7.5) — dipakai ST-DBSCAN<br>
-                    • <b>weekday</b>: hari dalam minggu (0=Senin, 6=Minggu)
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            if 'jam_desimal' in df_result.columns:
-                fig = px.histogram(df_result, x='jam_desimal', nbins=48,
-                                   title='Distribusi Jam Absensi',
-                                   labels={'jam_desimal':'Jam (desimal)','count':'Jumlah'})
-                fig.update_layout(height=280)
-                st.plotly_chart(fig, use_container_width=True)
-
-        # Step 5
-        with st.expander("✅ Step 5: Coordinate Transformation", expanded=False):
-            st.markdown("""
-            <div class="step-box">
-                <div class="step-title">Apa yang dilakukan?</div>
-                <div class="step-desc">
-                    Konversi lat/long dari derajat ke radian menggunakan np.radians().<br>
-                    <b>Mengapa?</b> DBSCAN dengan metric='haversine' di scikit-learn membutuhkan input dalam radian,
-                    bukan derajat. Tanpa konversi ini, jarak yang dihitung akan salah.
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            if 'lat_rad' in df_result.columns:
-                st.dataframe(df_result[['lat','long','lat_rad','long_rad']].head(5),
-                             use_container_width=True)
-
-        # Step 6
-        with st.expander("✅ Step 6: Split Masuk / Pulang", expanded=False):
-            st.markdown("""
-            <div class="step-box">
-                <div class="step-title">Apa yang dilakukan?</div>
-                <div class="step-desc">
-                    Memisahkan data menjadi dua subset: M (Masuk) dan P (Pulang).<br>
-                    <b>Mengapa?</b> Pola lokasi masuk dan pulang bisa berbeda. Clustering terpisah
-                    menghasilkan hotspot yang lebih akurat untuk masing-masing jenis absensi.
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric("Data MASUK (M)", f"{log.get('step6_masuk',0):,}")
-            with col2:
-                st.metric("Data PULANG (P)", f"{log.get('step6_pulang',0):,}")
-
-        # Step 7
-        with st.expander("✅ Step 7: DBSCAN Spatial Clustering", expanded=False):
-            st.markdown(f"""
-            <div class="step-box">
-                <div class="step-title">Apa yang dilakukan?</div>
-                <div class="step-desc">
-                    DBSCAN (Density-Based Spatial Clustering) mengelompokkan titik-titik absensi
-                    berdasarkan kepadatan lokasi.<br><br>
-                    <b>Parameter yang digunakan:</b><br>
-                    • eps = {params['eps_km']} km ({params['eps_km']*1000:.0f} meter) — radius cluster<br>
-                    • min_samples = {params['min_samples']} — minimum titik untuk membentuk cluster<br>
-                    • metric = haversine — jarak di permukaan bumi<br><br>
-                    <b>Output:</b><br>
-                    • cluster_masuk / cluster_pulang: label cluster (0,1,2,...)<br>
-                    • -1 = noise (tidak masuk cluster manapun) → sinyal anomali
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Cluster MASUK",  log.get('step7_clusters_masuk',0))
-            with col2:
-                st.metric("Noise MASUK",    log.get('step7_noise_masuk',0))
-            with col3:
-                st.metric("Cluster PULANG", log.get('step7_clusters_pulang',0))
-            with col4:
-                st.metric("Noise PULANG",   log.get('step7_noise_pulang',0))
-
-        # Step 8
-        with st.expander("✅ Step 8: Estimasi Lokasi Kantor per SKPD", expanded=False):
-            st.markdown("""
-            <div class="step-box">
-                <div class="step-title">Apa yang dilakukan?</div>
-                <div class="step-desc">
-                    Mengestimasi koordinat kantor setiap SKPD secara otomatis:<br>
-                    1. Ambil data MASUK yang sudah ter-cluster (bukan noise)<br>
-                    2. Cari cluster dengan anggota terbanyak per SKPD (= hotspot utama)<br>
-                    3. Hitung centroid (rata-rata lat/long) dari cluster terbesar<br>
-                    4. Centroid ini digunakan sebagai titik referensi kantor
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            st.metric("Kantor SKPD Terdeteksi", log.get('step8_offices', 0))
-            if 'office_centroid' in log:
-                st.dataframe(log['office_centroid'].head(10), use_container_width=True)
-
-        # Step 9
-        with st.expander("✅ Step 9: Haversine Distance", expanded=False):
-            st.markdown("""
-            <div class="step-box">
-                <div class="step-title">Apa yang dilakukan?</div>
-                <div class="step-desc">
-                    Menghitung jarak setiap titik absensi ke kantor SKPD-nya menggunakan formula Haversine.<br>
-                    <b>Mengapa Haversine?</b> Bumi berbentuk bulat, sehingga jarak Euclidean biasa tidak akurat
-                    untuk koordinat geografis. Haversine menghitung jarak di permukaan bola.<br><br>
-                    <b>Flag yang dibuat:</b><br>
-                    • outside_300m: jarak > 300m<br>
-                    • very_far: jarak > 5km<br>
-                    • extreme_far: jarak > 50km (indikasi fake GPS)
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            if 'dist_km' in df_result.columns:
-                col1, col2, col3, col4 = st.columns(4)
-                with col1:
-                    st.metric("Rata-rata Jarak", f"{df_result['dist_km'].mean():.3f} km")
-                with col2:
-                    st.metric("Median Jarak", f"{df_result['dist_km'].median():.3f} km")
-                with col3:
-                    st.metric("Di luar 300m", f"{df_result['outside_300m'].sum():,}")
-                with col4:
-                    st.metric("Extreme >50km", f"{df_result['extreme_far'].sum():,}")
-
-        # Step 10
-        with st.expander("✅ Step 10: Validation Logic", expanded=False):
-            st.markdown("""
-            <div class="step-box">
-                <div class="step-title">Apa yang dilakukan?</div>
-                <div class="step-desc">
-                    Membuat flag validasi berdasarkan kombinasi jarak + catatan + status_lokasi:<br>
-                    • <b>no_note</b>: tidak ada catatan/alasan<br>
-                    • <b>far_no_note</b>: jauh + tidak ada alasan → indikasi fraud kuat<br>
-                    • <b>far_with_note</b>: jauh tapi ada alasan → kemungkinan tugas luar valid<br>
-                    • <b>near_but_status0</b>: dekat tapi sistem lama bilang di luar → mismatch kecil
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            if 'far_no_note' in df_result.columns:
-                val_data = {
-                    'Flag': ['far_no_note','far_with_note','near_but_status0'],
-                    'Jumlah': [
-                        int(df_result['far_no_note'].sum()),
-                        int(df_result['far_with_note'].sum()),
-                        int(df_result['near_but_status0'].sum())
-                    ]
-                }
-                st.dataframe(pd.DataFrame(val_data), use_container_width=True, hide_index=True)
-
-        # Step 11
-        with st.expander("✅ Step 11: ST-DBSCAN (Spatio-Temporal)", expanded=False):
-            st.markdown(f"""
-            <div class="step-box">
-                <div class="step-title">Apa yang dilakukan?</div>
-                <div class="step-desc">
-                    ST-DBSCAN menggabungkan dimensi spasial (lat/long) dan temporal (jam_desimal)
-                    dalam satu clustering.<br><br>
-                    <b>Mengapa?</b> Seseorang bisa absen di lokasi yang sama tapi di waktu yang sangat berbeda
-                    (misal: absen masuk jam 7 pagi dan jam 11 malam). ST-DBSCAN mendeteksi inkonsistensi ini.<br><br>
-                    <b>Parameter:</b><br>
-                    • eps_space = {params['st_eps_km']} km<br>
-                    • eps_time = {params['st_eps_hours']} jam<br>
-                    • min_samples = {params['st_min_samples']}
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric("ST-Noise MASUK",  log.get('step12_st_noise_masuk',0))
-            with col2:
-                st.metric("ST-Noise PULANG", log.get('step12_st_noise_pulang',0))
-
-        # Step 12-13
-        with st.expander("✅ Step 12-13: Anomaly Scoring & Risk Level", expanded=True):
-            st.markdown("""
-            <div class="step-box">
-                <div class="step-title">Apa yang dilakukan?</div>
-                <div class="step-desc">
-                    Menggabungkan semua sinyal anomali menjadi satu skor risiko,
-                    lalu mengklasifikasikan ke LOW / MED / HIGH.
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Total Data", f"{log.get('step13_total',0):,}")
-            with col2:
-                st.metric("🔴 HIGH", f"{log.get('step13_high',0):,}")
-            with col3:
-                st.metric("🟡 MED",  f"{log.get('step13_med',0):,}")
-            with col4:
-                st.metric("🟢 LOW",  f"{log.get('step13_low',0):,}")
-
-            if 'risk_level' in df_result.columns:
-                fig = px.pie(
-                    df_result['risk_level'].value_counts().reset_index(),
-                    values='count', names='risk_level',
-                    title='Distribusi Risk Level',
-                    color='risk_level',
-                    color_discrete_map={'HIGH':'#e74c3c','MED':'#f39c12','LOW':'#27ae60'},
-                    hole=0.4
-                )
-                fig.update_layout(height=300)
-                st.plotly_chart(fig, use_container_width=True)
-
-        # Download hasil
-        st.markdown("---")
-        st.markdown("### 💾 Download Hasil Preprocessing")
-        csv_buf = io.StringIO()
-        df_result.to_csv(csv_buf, index=False)
-        st.download_button(
-            label="⬇️ Download absensi_processed.csv",
-            data=csv_buf.getvalue().encode('utf-8'),
-            file_name="absensi_processed.csv",
-            mime="text/csv",
-            use_container_width=True
-        )
-
-        excel_buf = io.BytesIO()
-        df_result.to_excel(excel_buf, index=False)
-        st.download_button(
-            label="⬇️ Download absensi_processed.xlsx",
-            data=excel_buf.getvalue(),
-            file_name="absensi_processed.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
-
+    folium.LayerControl().add_to(m)
+    return m
 
 # ============================================================
 # PAGE: VISUALISASI
 # ============================================================
-
 def page_visualisasi(filters):
     st.markdown("## 📊 Visualisasi Anomali Absensi")
-
-    if 'df_result' not in st.session_state or st.session_state.df_result is None:
-        st.warning("⚠️ Belum ada data. Silakan upload dan jalankan preprocessing terlebih dahulu di menu **📥 Upload & Preprocessing**.")
+    if 'df' not in st.session_state or st.session_state.df is None:
+        st.warning("⚠️ Belum ada data. Upload dulu di menu **📥 Upload Data**.")
         return
 
-    df_full = st.session_state.df_result
-    log     = st.session_state.get('log', {})
+    df_full = st.session_state.df
+    oc      = st.session_state.get('office_centroid')
 
-    # Apply filters
+    h = _df_hash(df_full)
     df = apply_filters(
-        df_full,
-        filters.get('skpd', 'Semua'),
-        filters.get('risk', ['HIGH','MED','LOW']),
-        filters.get('jenis', ['M','P']),
-        filters.get('date', None),
-        filters.get('dist', (0.0, 100.0))
+        h, df_full,
+        filters.get('skpd','Semua'),
+        tuple(filters.get('risk',['HIGH','MED','LOW'])),
+        tuple(filters.get('jenis',['M','P'])),
+        filters.get('date'),
+        filters.get('dist',(0.0,100.0)),
+        filters.get('approver','Semua')
     )
+    st.caption(f"📊 Menampilkan **{len(df):,}** dari **{len(df_full):,}** absensi")
 
-    st.caption(f"📊 Menampilkan **{len(df):,}** dari **{len(df_full):,}** total absensi")
+    tabs = st.tabs(["📊 Overview","🗺️ Peta","⏰ Temporal","📏 Jarak","👤 Karyawan","📋 Approver","📋 Data"])
+    with tabs[0]: _vis_overview(df)
+    with tabs[1]: _vis_map(df, filters, oc)
+    with tabs[2]: _vis_temporal(df)
+    with tabs[3]: _vis_distance(df)
+    with tabs[4]: _vis_employee(df)
+    with tabs[5]: _vis_approver(df)
+    with tabs[6]: _vis_data(df)
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-        "📊 Overview", "🗺️ Peta", "⏰ Temporal",
-        "📏 Jarak", "👤 Karyawan", "🔵 Cluster", "📋 Data"
-    ])
-
-    with tab1:
-        _tab_overview(df)
-    with tab2:
-        _tab_map(df, filters, log)
-    with tab3:
-        _tab_temporal(df)
-    with tab4:
-        _tab_distance(df)
-    with tab5:
-        _tab_employee(df)
-    with tab6:
-        _tab_cluster(df)
-    with tab7:
-        _tab_data(df)
-
-
-def _tab_overview(df):
-    col1, col2, col3, col4, col5 = st.columns(5)
-    with col1: st.metric("Total Absensi",  f"{len(df):,}")
-    with col2: st.metric("Total Karyawan", f"{df['karyawan_id'].nunique():,}")
-    with col3:
+def _vis_overview(df):
+    c1,c2,c3,c4,c5 = st.columns(5)
+    with c1: st.metric("Total Absensi",  f"{len(df):,}")
+    with c2: st.metric("Karyawan",       f"{df['karyawan_id'].nunique():,}")
+    with c3:
         h = (df['risk_level']=='HIGH').sum()
-        st.metric("🔴 HIGH", f"{h:,}", delta=f"{h/len(df)*100:.1f}%" if len(df)>0 else "0%")
-    with col4: st.metric("🟡 MED",  f"{(df['risk_level']=='MED').sum():,}")
-    with col5: st.metric("🟢 LOW",  f"{(df['risk_level']=='LOW').sum():,}")
+        st.metric("🔴 HIGH", f"{h:,}", f"{h/len(df)*100:.1f}%" if len(df) else "0%")
+    with c4: st.metric("🟡 MED", f"{(df['risk_level']=='MED').sum():,}")
+    with c5: st.metric("🟢 LOW", f"{(df['risk_level']=='LOW').sum():,}")
 
-    st.markdown("---")
+    if 'false_negative' in df.columns and df['false_negative'].sum() > 0:
+        fn = df['false_negative'].sum()
+        st.markdown(f"""<div class='alert-box alert-red'>
+        🚨 <b>Peringatan False Negative:</b> {fn:,} absensi dinilai <b>HIGH risk</b> oleh sistem
+        tapi sudah di-<b>TERIMA</b> oleh approver — perlu review manual!
+        </div>""", unsafe_allow_html=True)
+
     col_l, col_r = st.columns(2)
     with col_l:
         fig = px.pie(df['risk_level'].value_counts().reset_index(),
                      values='count', names='risk_level', title='Distribusi Risk Level',
                      color='risk_level',
                      color_discrete_map={'HIGH':'#e74c3c','MED':'#f39c12','LOW':'#27ae60'}, hole=0.4)
-        fig.update_layout(height=350)
+        fig.update_layout(height=340)
         st.plotly_chart(fig, use_container_width=True)
     with col_r:
         skpd_risk = df.groupby(['id_skpd','risk_level']).size().reset_index(name='count')
         fig = px.bar(skpd_risk, x='id_skpd', y='count', color='risk_level',
                      title='Distribusi Risk per SKPD', barmode='stack',
-                     color_discrete_map={'HIGH':'#e74c3c','MED':'#f39c12','LOW':'#27ae60'},
-                     labels={'id_skpd':'SKPD','count':'Jumlah','risk_level':'Risk'})
-        fig.update_layout(height=350)
+                     color_discrete_map={'HIGH':'#e74c3c','MED':'#f39c12','LOW':'#27ae60'})
+        fig.update_layout(height=340)
         st.plotly_chart(fig, use_container_width=True)
 
-    fig = px.histogram(df, x='anomaly_score', color='risk_level',
-                       title='Distribusi Anomaly Score', nbins=30,
+    fig = px.histogram(df, x='anomaly_score', color='risk_level', nbins=30,
+                       title='Distribusi Anomaly Score',
                        color_discrete_map={'HIGH':'#e74c3c','MED':'#f39c12','LOW':'#27ae60'})
-    fig.update_layout(height=300)
+    fig.update_layout(height=280)
     st.plotly_chart(fig, use_container_width=True)
 
-
-def _tab_map(df, filters, log):
-    if len(df) == 0:
-        st.warning("Tidak ada data untuk ditampilkan.")
+def _vis_map(df, filters, oc):
+    if df.empty:
+        st.warning("Tidak ada data.")
         return
+    MAX = 2000
+    df_d = df.sample(MAX, random_state=42) if len(df) > MAX else df
+    if len(df) > MAX:
+        st.info(f"Menampilkan {MAX:,} dari {len(df):,} titik.")
+    m = create_folium_map(df_d, filters.get('map_type','marker'), oc)
+    st_folium(m, width=None, height=560, returned_objects=[])
+    st.markdown("🔴 HIGH &nbsp; 🟡 MED &nbsp; 🟢 LOW &nbsp; 🔵 Kantor &nbsp; ⭕ 300m &nbsp; 🟡-border = False Negative")
 
-    MAX_POINTS = 2000
-    if len(df) > MAX_POINTS:
-        st.info(f"⚠️ Menampilkan {MAX_POINTS} dari {len(df):,} titik untuk performa optimal.")
-        df_disp = df.sample(MAX_POINTS, random_state=42)
-    else:
-        df_disp = df
-
-    office_centroid = log.get('office_centroid', None)
-    map_type  = filters.get('map_type', 'marker')
-    use_pydeck = filters.get('use_pydeck', False)
-
-    if use_pydeck:
-        st.markdown("### 🌐 Peta 3D (PyDeck)")
-        deck = create_pydeck_map(df_disp)
-        st.pydeck_chart(deck)
-    else:
-        st.markdown(f"### 🗺️ Peta Interaktif")
-        m = create_folium_map(df_disp, map_type, office_centroid)
-        st_folium(m, width=None, height=560, returned_objects=[])
-
-    st.markdown("**Legenda:** 🔴 HIGH Risk &nbsp; 🟡 MED Risk &nbsp; 🟢 LOW Risk &nbsp; 🔵 Kantor SKPD &nbsp; ⭕ Radius 300m")
-
-
-def _tab_temporal(df):
-    if 'tanggal_kirim' not in df.columns:
-        st.warning("Kolom tanggal_kirim tidak ditemukan.")
-        return
-
-    col1, col2 = st.columns(2)
-    with col1:
-        if 'jam' in df.columns:
-            fig = px.bar(df.groupby(['jam','risk_level']).size().reset_index(name='count'),
-                         x='jam', y='count', color='risk_level', title='Distribusi per Jam',
+def _vis_temporal(df):
+    if 'jam' in df.columns:
+        col1,col2 = st.columns(2)
+        with col1:
+            fig = px.bar(df.groupby(['jam','risk_level']).size().reset_index(name='n'),
+                         x='jam', y='n', color='risk_level', title='Per Jam',
                          color_discrete_map={'HIGH':'#e74c3c','MED':'#f39c12','LOW':'#27ae60'})
+            fig.add_vrect(x0=7,x1=9, fillcolor='green', opacity=0.07, annotation_text='Jam Masuk')
+            fig.add_vrect(x0=15,x1=17, fillcolor='purple', opacity=0.07, annotation_text='Jam Pulang')
             st.plotly_chart(fig, use_container_width=True)
-    with col2:
-        if 'weekday' in df.columns:
-            day_names = {0:'Senin',1:'Selasa',2:'Rabu',3:'Kamis',4:'Jumat',5:'Sabtu',6:'Minggu'}
-            df2 = df.copy()
-            df2['hari'] = df2['weekday'].map(day_names)
-            fig = px.bar(df2.groupby(['hari','risk_level']).size().reset_index(name='count'),
-                         x='hari', y='count', color='risk_level', title='Distribusi per Hari',
-                         color_discrete_map={'HIGH':'#e74c3c','MED':'#f39c12','LOW':'#27ae60'},
-                         category_orders={'hari':['Senin','Selasa','Rabu','Kamis','Jumat','Sabtu','Minggu']})
-            st.plotly_chart(fig, use_container_width=True)
+        with col2:
+            if 'weekday' in df.columns:
+                dm = {0:'Senin',1:'Selasa',2:'Rabu',3:'Kamis',4:'Jumat',5:'Sabtu',6:'Minggu'}
+                df2 = df.copy(); df2['hari'] = df2['weekday'].map(dm)
+                fig = px.bar(df2.groupby(['hari','risk_level']).size().reset_index(name='n'),
+                             x='hari', y='n', color='risk_level', title='Per Hari',
+                             color_discrete_map={'HIGH':'#e74c3c','MED':'#f39c12','LOW':'#27ae60'},
+                             category_orders={'hari':list(dm.values())})
+                st.plotly_chart(fig, use_container_width=True)
 
     if 'tanggal' in df.columns:
-        daily = df.groupby(['tanggal','risk_level']).size().reset_index(name='count')
-        fig = px.line(daily, x='tanggal', y='count', color='risk_level',
-                      title='Trend Anomali Harian', markers=True,
+        daily = df.groupby(['tanggal','risk_level']).size().reset_index(name='n')
+        fig = px.line(daily, x='tanggal', y='n', color='risk_level', markers=True,
+                      title='Trend Harian',
                       color_discrete_map={'HIGH':'#e74c3c','MED':'#f39c12','LOW':'#27ae60'})
-        fig.update_layout(height=350)
+        fig.update_layout(height=320)
         st.plotly_chart(fig, use_container_width=True)
 
-    if 'jam_desimal' in df.columns and 'dist_km' in df.columns:
-        fig = px.scatter(df.sample(min(1000,len(df))), x='jam_desimal', y='dist_km',
-                         color='risk_level', title='Jam Absensi vs Jarak ke Kantor',
-                         color_discrete_map={'HIGH':'#e74c3c','MED':'#f39c12','LOW':'#27ae60'},
-                         opacity=0.6, hover_data=['karyawan_id','id_skpd'])
-        fig.add_hline(y=0.3, line_dash='dash', line_color='gray', annotation_text='300m')
-        fig.update_layout(height=400)
-        st.plotly_chart(fig, use_container_width=True)
-
-
-def _tab_distance(df):
+def _vis_distance(df):
     if 'dist_km' not in df.columns:
-        st.warning("Kolom dist_km tidak ditemukan.")
-        return
-
-    col1, col2, col3, col4 = st.columns(4)
-    with col1: st.metric("Rata-rata Jarak", f"{df['dist_km'].mean():.3f} km")
-    with col2: st.metric("Median Jarak",    f"{df['dist_km'].median():.3f} km")
-    with col3: st.metric("Jarak Maks",      f"{df['dist_km'].max():.3f} km")
-    with col4:
+        st.warning("Kolom dist_km tidak ditemukan."); return
+    c1,c2,c3,c4 = st.columns(4)
+    with c1: st.metric("Rata-rata", f"{df['dist_km'].mean():.3f} km")
+    with c2: st.metric("Median",    f"{df['dist_km'].median():.3f} km")
+    with c3: st.metric("Maksimum",  f"{df['dist_km'].max():.3f} km")
+    with c4:
         out = (df['dist_km']>0.3).sum()
         st.metric("Di luar 300m", f"{out:,} ({out/len(df)*100:.1f}%)")
 
-    col_l, col_r = st.columns(2)
+    col_l,col_r = st.columns(2)
     with col_l:
         fig = px.histogram(df[df['dist_km']<=10], x='dist_km', color='risk_level',
-                           title='Distribusi Jarak (≤10km)', nbins=50,
+                           title='Distribusi Jarak ≤10km', nbins=50,
                            color_discrete_map={'HIGH':'#e74c3c','MED':'#f39c12','LOW':'#27ae60'})
         fig.add_vline(x=0.3, line_dash='dash', line_color='red', annotation_text='300m')
-        fig.add_vline(x=5.0, line_dash='dash', line_color='orange', annotation_text='5km')
         st.plotly_chart(fig, use_container_width=True)
     with col_r:
         fig = px.box(df[df['dist_km']<=10], x='id_skpd', y='dist_km', color='risk_level',
-                     title='Distribusi Jarak per SKPD',
+                     title='Boxplot Jarak per SKPD',
                      color_discrete_map={'HIGH':'#e74c3c','MED':'#f39c12','LOW':'#27ae60'})
         st.plotly_chart(fig, use_container_width=True)
 
-    st.markdown("### 🚨 Kasus Extreme (>5km)")
-    extreme = df[df['dist_km']>5].sort_values('dist_km', ascending=False)
-    if len(extreme) > 0:
-        cols_show = ['karyawan_id','id_skpd','jenis','tanggal_kirim','lat','long',
-                     'dist_km','anomaly_score','risk_level','system_action','catatan']
-        cols_show = [c for c in cols_show if c in extreme.columns]
-        st.dataframe(extreme[cols_show].head(50), use_container_width=True)
-    else:
-        st.success("✅ Tidak ada kasus extreme (>5km) dalam filter ini.")
-
-
-def _tab_employee(df):
-    emp_agg = df.groupby('karyawan_id').agg(
-        total_absensi=('karyawan_id','count'),
-        avg_dist_km=('dist_km','mean'),
-        max_dist_km=('dist_km','max'),
-        avg_score=('anomaly_score','mean'),
-        max_score=('anomaly_score','max'),
+def _vis_employee(df):
+    agg = df.groupby('karyawan_id').agg(
+        total=('karyawan_id','count'),
         high_count=('risk_level', lambda x: (x=='HIGH').sum()),
+        avg_score=('anomaly_score','mean'),
+        max_dist=('dist_km','max'),
         skpd=('id_skpd','first')
     ).reset_index()
-    emp_agg['high_pct'] = (emp_agg['high_count'] / emp_agg['total_absensi'] * 100).round(1)
+    agg['high_pct'] = (agg['high_count']/agg['total']*100).round(1)
 
-    col1, col2 = st.columns(2)
-    with col1:
-        top = emp_agg.nlargest(10,'high_count')
-        fig = px.bar(top, x='karyawan_id', y='high_count', title='Top 10 Karyawan HIGH Risk',
+    col_l,col_r = st.columns(2)
+    with col_l:
+        top = agg.nlargest(10,'high_count')
+        fig = px.bar(top, x='karyawan_id', y='high_count', title='Top 10 HIGH Risk',
                      color='high_pct', color_continuous_scale='Reds')
         fig.update_xaxes(type='category')
         st.plotly_chart(fig, use_container_width=True)
-    with col2:
-        fig = px.scatter(emp_agg, x='total_absensi', y='avg_score', size='max_dist_km',
+    with col_r:
+        fig = px.scatter(agg, x='total', y='avg_score', size='max_dist',
                          color='high_pct', hover_data=['karyawan_id','skpd'],
-                         title='Total Absensi vs Rata-rata Score',
+                         title='Total Absensi vs Avg Score',
                          color_continuous_scale='RdYlGn_r')
         st.plotly_chart(fig, use_container_width=True)
 
-    st.markdown("### 🚨 Karyawan Berisiko Tinggi")
-    risky = emp_agg[emp_agg['high_count']>0].sort_values('high_count', ascending=False)
-    if len(risky) > 0:
+    risky = agg[agg['high_count']>0].sort_values('high_count', ascending=False)
+    if len(risky):
+        st.markdown("### 🚨 Karyawan Berisiko Tinggi")
         st.dataframe(risky.head(30), use_container_width=True)
-    else:
-        st.success("✅ Tidak ada karyawan dengan HIGH risk dalam filter ini.")
 
+def _vis_approver(df):
+    st.markdown("### 📋 Analisis Approver Status")
+    if 'approver_status' not in df.columns:
+        st.info("Kolom approver_status tidak ada di dataset ini."); return
 
-def _tab_cluster(df):
-    col1, col2 = st.columns(2)
-    with col1:
-        if 'cluster_masuk' in df.columns:
-            masuk = df[df['jenis']=='M']
-            noise_pct = (masuk['cluster_masuk']==-1).mean()*100
-            st.metric("Noise MASUK", f"{noise_pct:.1f}%")
-            if 'cluster_size_masuk' in df.columns:
-                fig = px.histogram(masuk[masuk['cluster_masuk']!=-1], x='cluster_size_masuk',
-                                   title='Ukuran Cluster MASUK')
-                st.plotly_chart(fig, use_container_width=True)
-    with col2:
-        if 'cluster_pulang' in df.columns:
-            pulang = df[df['jenis']=='P']
-            noise_pct_p = (pulang['cluster_pulang']==-1).mean()*100
-            st.metric("Noise PULANG", f"{noise_pct_p:.1f}%")
-            if 'cluster_size_pulang' in df.columns:
-                fig = px.histogram(pulang[pulang['cluster_pulang']!=-1], x='cluster_size_pulang',
-                                   title='Ukuran Cluster PULANG')
-                st.plotly_chart(fig, use_container_width=True)
+    c1,c2,c3,c4 = st.columns(4)
+    with c1: st.metric("✅ TERIMA",        f"{df['is_terima'].sum():,}")
+    with c2: st.metric("❌ TOLAK",         f"{df['is_tolak'].sum():,}")
+    with c3: st.metric("⏳ PENDING",       f"{df['is_pending'].sum():,}")
+    with c4: st.metric("🚨 False Negative",f"{df['false_negative'].sum():,}")
 
-    if 'is_st_noise_masuk' in df.columns:
-        st.markdown("### 🟣 ST-DBSCAN Noise")
-        col3, col4 = st.columns(2)
-        with col3:
-            st.metric("ST-Noise MASUK",  f"{df[df['jenis']=='M']['is_st_noise_masuk'].mean()*100:.1f}%")
-        with col4:
-            if 'is_st_noise_pulang' in df.columns:
-                st.metric("ST-Noise PULANG", f"{df[df['jenis']=='P']['is_st_noise_pulang'].mean()*100:.1f}%")
+    col_l,col_r = st.columns(2)
+    with col_l:
+        # Approver vs Risk cross-tab
+        cross = df.groupby(['risk_level','approver_status']).size().reset_index(name='n')
+        cross = cross[cross['approver_status'] != '']
+        fig = px.bar(cross, x='risk_level', y='n', color='approver_status',
+                     title='Risk Level vs Keputusan Approver', barmode='group')
+        fig.update_layout(height=340)
+        st.plotly_chart(fig, use_container_width=True)
+    with col_r:
+        # TOLAK per SKPD
+        tolak_skpd = df[df['is_tolak']==1].groupby('id_skpd').size().reset_index(name='n_tolak')
+        fig = px.bar(tolak_skpd.sort_values('n_tolak',ascending=False),
+                     x='id_skpd', y='n_tolak', title='TOLAK per SKPD',
+                     color='n_tolak', color_continuous_scale='Reds')
+        fig.update_xaxes(type='category')
+        fig.update_layout(height=340)
+        st.plotly_chart(fig, use_container_width=True)
 
+    # False Negative detail
+    fn_df = df[df['false_negative']==1].sort_values('anomaly_score', ascending=False)
+    if len(fn_df):
+        st.markdown(f"""<div class='alert-box alert-red'>
+        🚨 <b>{len(fn_df):,} False Negative</b> — absensi HIGH risk yang sudah di-TERIMA approver.
+        Butuh review manual segera!
+        </div>""", unsafe_allow_html=True)
+        cols = ['karyawan_id','id_skpd','jenis','tanggal_kirim','dist_km',
+                'anomaly_score','risk_level','approver_status','catatan']
+        cols = [c for c in cols if c in fn_df.columns]
+        st.dataframe(fn_df[cols].head(50), use_container_width=True)
+        csv = fn_df[cols].to_csv(index=False).encode('utf-8')
+        st.download_button("⬇️ Download False Negative CSV", csv,
+                           "false_negative.csv", "text/csv")
 
-def _tab_data(df):
-    col1, col2 = st.columns(2)
-    with col1:
-        search = st.text_input("🔍 Cari Karyawan ID", "")
-    with col2:
-        sort_col = st.selectbox("Urutkan", ['anomaly_score','dist_km','tanggal_kirim'])
+    # PENDING lama
+    pending_df = df[df['is_pending']==1]
+    if len(pending_df):
+        st.markdown(f"""<div class='alert-box alert-orange'>
+        ⏳ <b>{len(pending_df):,} absensi masih PENDING</b> belum ada keputusan approver.
+        </div>""", unsafe_allow_html=True)
+        pend_agg = pending_df.groupby(['karyawan_id','id_skpd','risk_level']).size().reset_index(name='n_pending')
+        pend_agg = pend_agg.sort_values('n_pending', ascending=False)
+        st.dataframe(pend_agg.head(30), use_container_width=True)
 
+def _vis_data(df):
+    col1,col2 = st.columns(2)
+    with col1: search = st.text_input("🔍 Cari Karyawan ID","")
+    with col2: sort_col = st.selectbox("Urutkan", ['anomaly_score','dist_km','tanggal_kirim'])
     df_t = df.copy()
     if search:
         df_t = df_t[df_t['karyawan_id'].astype(str).str.contains(search)]
     if sort_col in df_t.columns:
         df_t = df_t.sort_values(sort_col, ascending=False)
-
     cols_show = ['karyawan_id','id_skpd','jenis','tanggal_kirim','lat','long',
-                 'dist_km','anomaly_score','risk_level','system_action',
-                 'outside_300m','very_far','extreme_far','far_no_note','catatan']
+                 'dist_km','anomaly_score','risk_level','approver_status',
+                 'false_negative','system_action','outside_300m','very_far',
+                 'extreme_far','far_no_note','catatan']
     cols_show = [c for c in cols_show if c in df_t.columns]
-
-    st.dataframe(df_t[cols_show].head(500), use_container_width=True, height=500)
-    st.caption(f"Menampilkan {min(500,len(df_t))} dari {len(df_t)} baris")
-
+    st.dataframe(df_t[cols_show].head(500), use_container_width=True, height=480)
+    st.caption(f"Menampilkan {min(500,len(df_t))} dari {len(df_t):,} baris")
     csv = df_t[cols_show].to_csv(index=False).encode('utf-8')
     st.download_button("⬇️ Download CSV", csv, "absensi_filtered.csv", "text/csv")
 
+# ============================================================
+# PAGE: HUNTING
+# ============================================================
+def page_hunting():
+    if 'df' not in st.session_state or st.session_state.df is None:
+        st.warning("⚠️ Belum ada data. Upload dulu di menu **📥 Upload Data**."); return
+
+    df  = st.session_state.df
+    oc  = st.session_state.get('office_centroid', pd.DataFrame())
+
+    st.markdown("""
+    <div class="hunt-header">
+        <div class="hunt-title">[ HUNTING MODE ]</div>
+        <div class="hunt-sub">Investigasi mendalam anomali absensi — drill down by pegawai, unit kerja, atau tanggal</div>
+    </div>""", unsafe_allow_html=True)
+
+    total = len(df)
+    nh = (df['risk_level']=='HIGH').sum()
+    nm = (df['risk_level']=='MED').sum()
+    nl = (df['risk_level']=='LOW').sum()
+    fn = df.get('false_negative', pd.Series([0]*len(df))).sum() if 'false_negative' in df.columns else 0
+
+    st.markdown(f"""
+    <div style="background:#f0f2f6;border-radius:8px;padding:.6rem 1.2rem;margin-bottom:1rem;
+                display:flex;gap:2rem;align-items:center;font-size:.86rem;flex-wrap:wrap">
+        <span>📊 <b>{total:,}</b> absensi</span>
+        <span>🔴 <b style="color:#e74c3c">{nh:,}</b> HIGH</span>
+        <span>🟡 <b style="color:#f39c12">{nm:,}</b> MED</span>
+        <span>🟢 <b style="color:#27ae60">{nl:,}</b> LOW</span>
+        <span>👤 <b>{df['karyawan_id'].nunique():,}</b> karyawan</span>
+        <span>🏢 <b>{df['id_skpd'].nunique():,}</b> SKPD</span>
+        {"<span>🚨 <b style='color:#e74c3c'>" + str(fn) + "</b> False Negative</span>" if fn > 0 else ""}
+    </div>""", unsafe_allow_html=True)
+
+    tab_peg, tab_skpd, tab_tgl = st.tabs([
+        "🕵️ Section 1 — By Pegawai",
+        "🏢 Section 2 — By SKPD",
+        "📅 Section 3 — By Tanggal",
+    ])
+    with tab_peg:  _hunt_pegawai(df, oc)
+    with tab_skpd: _hunt_skpd(df, oc)
+    with tab_tgl:  _hunt_tanggal(df, oc)
+
+# ── HUNT: PEGAWAI ────────────────────────────────────────────
+def _hunt_pegawai(df, oc):
+    st.markdown("""<div class="section-header">
+        <span class="section-icon">🕵️</span>
+        <div><div class="section-title">Hunt by Pegawai</div>
+        <div class="section-desc">Timeline, jejak lokasi, perbandingan SKPD, tren risiko, analisis approver</div></div>
+    </div>""", unsafe_allow_html=True)
+
+    if 'watchlist' not in st.session_state:
+        st.session_state['watchlist'] = []
+
+    all_ids = sorted(df['karyawan_id'].unique().tolist())
+    col_s, col_b = st.columns([4,1])
+    with col_s:
+        sel_id = st.selectbox(
+            "🔎 Pilih ID Pegawai",
+            all_ids,
+            format_func=lambda x: (
+                f"ID {x} | SKPD {df[df['karyawan_id']==x]['id_skpd'].iloc[0] if len(df[df['karyawan_id']==x])>0 else '-'}"
+                f" | HIGH: {(df[df['karyawan_id']==x]['risk_level']=='HIGH').sum()}"
+                f" | Score avg: {df[df['karyawan_id']==x]['anomaly_score'].mean():.0f}"
+            ),
+            key='hunt_peg_id'
+        )
+    with col_b:
+        st.markdown("<br>", unsafe_allow_html=True)
+        in_wl = sel_id in st.session_state['watchlist']
+        if st.button("📌 Watchlist" if not in_wl else "❌ Hapus WL", use_container_width=True):
+            if in_wl: st.session_state['watchlist'].remove(sel_id)
+            else:      st.session_state['watchlist'].append(sel_id)
+            st.rerun()
+
+    df_e = df[df['karyawan_id'] == sel_id].sort_values('tanggal_kirim')
+    if df_e.empty:
+        st.warning("Tidak ada data."); return
+
+    total_e = len(df_e)
+    n_high  = (df_e['risk_level']=='HIGH').sum()
+    n_med   = (df_e['risk_level']=='MED').sum()
+    avg_km  = df_e['dist_km'].mean()
+    max_km  = df_e['dist_km'].max()
+    avg_sc  = df_e['anomaly_score'].mean()
+    skpd_e  = df_e['id_skpd'].mode()[0]
+
+    # Approver summary untuk karyawan ini
+    n_tolak  = df_e.get('is_tolak', pd.Series([0]*len(df_e))).sum() if 'is_tolak' in df_e.columns else 0
+    n_fn     = df_e.get('false_negative', pd.Series([0]*len(df_e))).sum() if 'false_negative' in df_e.columns else 0
+    n_pend   = df_e.get('is_pending', pd.Series([0]*len(df_e))).sum() if 'is_pending' in df_e.columns else 0
+
+    # Trend
+    if 'tanggal_kirim' in df_e.columns and len(df_e) >= 4:
+        last_d  = df_e['tanggal_kirim'].max()
+        cutoff  = last_d - timedelta(days=7)
+        recent  = df_e[df_e['tanggal_kirim'] >= cutoff]['anomaly_score'].mean()
+        older   = df_e[df_e['tanggal_kirim'] <  cutoff]['anomaly_score'].mean()
+        if pd.notna(recent) and pd.notna(older) and older > 0:
+            pct = (recent-older)/older*100
+            trend_html = (f"<span class='trend-up'>▲ {pct:.0f}% Memburuk</span>" if pct > 10
+                          else f"<span class='trend-down'>▼ {abs(pct):.0f}% Membaik</span>" if pct < -10
+                          else "<span class='trend-flat'>➔ Stabil</span>")
+        else:
+            trend_html = "<span class='trend-flat'>Data terbatas</span>"
+    else:
+        trend_html = ""
+
+    st.markdown(f"""
+    <div class="metric-grid">
+        <div class="metric-card info"><div class="metric-val">{total_e}</div><div class="metric-lbl">Total Absensi</div></div>
+        <div class="metric-card danger"><div class="metric-val">{n_high}</div><div class="metric-lbl">HIGH Risk</div></div>
+        <div class="metric-card warning"><div class="metric-val">{n_med}</div><div class="metric-lbl">MED Risk</div></div>
+        <div class="metric-card"><div class="metric-val">{avg_km:.3f} km</div><div class="metric-lbl">Avg Jarak</div></div>
+        <div class="metric-card danger"><div class="metric-val">{max_km:.3f} km</div><div class="metric-lbl">Max Jarak</div></div>
+        <div class="metric-card"><div class="metric-val">{avg_sc:.0f}</div><div class="metric-lbl">Avg Score</div></div>
+        <div class="metric-card {'danger' if n_fn>0 else ''}"><div class="metric-val">{n_fn}</div><div class="metric-lbl">False Neg.</div></div>
+        <div class="metric-card {'warning' if n_tolak>0 else ''}"><div class="metric-val">{n_tolak}</div><div class="metric-lbl">TOLAK</div></div>
+        <div class="metric-card"><div class="metric-val">{n_pend}</div><div class="metric-lbl">Pending</div></div>
+    </div>
+    {"<div style='font-size:.84rem;margin-bottom:.8rem'>📈 Tren 7 hari terakhir: " + trend_html + "</div>" if trend_html else ""}
+    """, unsafe_allow_html=True)
+
+    if n_fn > 0:
+        st.markdown(f"""<div class='alert-box alert-red'>
+        🚨 <b>{n_fn} False Negative</b> — karyawan ini punya absensi HIGH risk yang sudah di-TERIMA approver!
+        </div>""", unsafe_allow_html=True)
+
+    t1,t2,t3,t4,t5,t6 = st.tabs(["📅 Timeline","🗺️ Jejak Lokasi","📊 Vs SKPD","📈 Tren","📋 Approver","📋 Riwayat"])
+
+    with t1:
+        st.markdown("""<div class='timeline-tip'>
+        💡 Titik besar + merah = HIGH risk. Perhatikan jam & pola hari — ada hari tertentu yang selalu anomali?
+        </div>""", unsafe_allow_html=True)
+        if 'tanggal' in df_e.columns and 'jam_desimal' in df_e.columns:
+            hover = ['dist_km','anomaly_score']
+            if 'catatan' in df_e.columns: hover.append('catatan')
+            if 'approver_status' in df_e.columns: hover.append('approver_status')
+            fig = px.scatter(df_e, x='tanggal', y='jam_desimal',
+                             color='risk_level', size='anomaly_score', symbol='jenis',
+                             color_discrete_map={'HIGH':'#e74c3c','MED':'#f39c12','LOW':'#27ae60'},
+                             title=f'Timeline — Karyawan {sel_id}', hover_data=hover,
+                             labels={'tanggal':'Tanggal','jam_desimal':'Jam'})
+            fig.add_hline(y=7.5,  line_dash='dot', line_color='#3498db', annotation_text='07:30')
+            fig.add_hline(y=16.0, line_dash='dot', line_color='#9b59b6', annotation_text='16:00')
+            fig.update_layout(height=420, plot_bgcolor='#fafafa')
+            st.plotly_chart(fig, use_container_width=True)
+
+    with t2:
+        ctr = [df_e['lat'].median(), df_e['long'].median()]
+        m = folium.Map(location=ctr, zoom_start=14, tiles='CartoDB positron')
+        coords = [[r['lat'],r['long']] for _,r in df_e.iterrows()]
+        if len(coords) > 1:
+            AntPath(locations=coords, color='#667eea', weight=2.5,
+                    opacity=0.6, delay=800, dash_array=[10,20]).add_to(m)
+        for i,(_,row) in enumerate(df_e.iterrows()):
+            c = risk_color_folium(row.get('risk_level','LOW'))
+            border = 'gold' if row.get('false_negative',0)==1 else c
+            popup = f"""<div style='font-size:12px;min-width:190px'>
+                <b>#{i+1} — {str(row.get('tanggal_kirim',''))[:16]}</b><br>
+                {'🟢 Masuk' if row.get('jenis')=='M' else '🔴 Pulang'}<br>
+                Jarak: {row.get('dist_km',0):.3f} km | Score: {row.get('anomaly_score',0)}<br>
+                Risk: <b>{row.get('risk_level','')}</b><br>
+                Approver: {row.get('approver_status','-') or '-'}<br>
+                {'⚠️ FALSE NEGATIVE' if row.get('false_negative',0)==1 else ''}
+            </div>"""
+            folium.CircleMarker(
+                location=[row['lat'],row['long']],
+                radius=11 if row.get('risk_level')=='HIGH' else 7,
+                color=border, fill=True, fill_color=c, fill_opacity=0.8,
+                popup=folium.Popup(popup, max_width=230),
+                tooltip=f"#{i+1}|{row.get('risk_level','')}"
+            ).add_to(m)
+        # Kantor
+        if not oc.empty:
+            off = oc[oc['id_skpd']==skpd_e]
+            if not off.empty:
+                o = off.iloc[0]
+                folium.Marker([o['office_lat'],o['office_long']],
+                              popup=f"Kantor SKPD {skpd_e}",
+                              icon=folium.Icon(color='blue',icon='home',prefix='fa')).add_to(m)
+                folium.Circle([o['office_lat'],o['office_long']], radius=300,
+                              color='#3498db', fill=False, weight=2, dash_array='5').add_to(m)
+        folium.LayerControl().add_to(m)
+        st_folium(m, width=None, height=500, returned_objects=[])
+        st.caption("🟡-border = False Negative | Garis animasi = urutan absensi")
+
+    with t3:
+        df_skpd_all = df[df['id_skpd']==skpd_e]
+        agg_skpd = df_skpd_all.groupby('karyawan_id').agg(
+            avg_score=('anomaly_score','mean'),
+            avg_dist=('dist_km','mean'),
+            high_pct=('risk_level', lambda x: (x=='HIGH').mean()*100)
+        ).reset_index()
+        emp_row = agg_skpd[agg_skpd['karyawan_id']==sel_id]
+        if not emp_row.empty:
+            e = emp_row.iloc[0]
+            def rank_str(series, val, higher_is_bad=True):
+                rank = (series>val).sum()+1 if higher_is_bad else (series<val).sum()+1
+                total = len(series)
+                pct = rank/total*100
+                ico = '🔴' if pct<30 else '🟡' if pct<60 else '🟢'
+                return f"{ico} Peringkat **{rank}** dari {total} karyawan"
+            st.markdown(f"""
+            #### Posisi di SKPD {skpd_e}
+            - Avg Score: {e['avg_score']:.1f} — {rank_str(agg_skpd['avg_score'], e['avg_score'])}
+            - Avg Jarak: {e['avg_dist']:.3f} km — {rank_str(agg_skpd['avg_dist'], e['avg_dist'])}
+            - % HIGH: {e['high_pct']:.1f}% — {rank_str(agg_skpd['high_pct'], e['high_pct'])}
+            """)
+        fig = px.scatter(agg_skpd, x='avg_dist', y='avg_score', size='high_pct',
+                         color='high_pct', color_continuous_scale='RdYlGn_r',
+                         hover_data=['karyawan_id'],
+                         title=f'Sebaran Karyawan SKPD {skpd_e}')
+        if not emp_row.empty:
+            e = emp_row.iloc[0]
+            fig.add_annotation(x=e['avg_dist'], y=e['avg_score'],
+                               text=f"▶ ID {sel_id}", showarrow=True,
+                               arrowhead=2, font=dict(color='#e74c3c',size=12))
+        fig.update_layout(height=420)
+        st.plotly_chart(fig, use_container_width=True)
+
+    with t4:
+        if 'tanggal' in df_e.columns:
+            daily = df_e.groupby('tanggal').agg(
+                avg_score=('anomaly_score','mean'),
+                max_score=('anomaly_score','max'),
+                n_high=('risk_level', lambda x: (x=='HIGH').sum())
+            ).reset_index()
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=daily['tanggal'], y=daily['avg_score'],
+                                     name='Avg Score', line=dict(color='#3498db',width=2), mode='lines+markers'))
+            fig.add_trace(go.Scatter(x=daily['tanggal'], y=daily['max_score'],
+                                     name='Max Score', line=dict(color='#e74c3c',width=1.5,dash='dash'), mode='lines+markers'))
+            fig.add_trace(go.Bar(x=daily['tanggal'], y=daily['n_high'],
+                                 name='# HIGH', marker_color='rgba(231,76,60,.2)', yaxis='y2'))
+            fig.update_layout(
+                title=f'Tren Harian Karyawan {sel_id}',
+                yaxis=dict(title='Score'), height=400,
+                yaxis2=dict(title='# HIGH', overlaying='y', side='right'),
+                hovermode='x unified'
+            )
+            fig.add_hrect(y0=70, y1=max(daily['max_score'].max()+5, 75),
+                          fillcolor='red', opacity=0.04, line_width=0)
+            fig.add_hrect(y0=30, y1=70, fillcolor='orange', opacity=0.04, line_width=0)
+            st.plotly_chart(fig, use_container_width=True)
+
+    with t5:
+        if 'approver_status' in df_e.columns:
+            st.markdown("#### Riwayat Approver Karyawan Ini")
+            c1,c2,c3 = st.columns(3)
+            with c1: st.metric("TERIMA", f"{df_e['is_terima'].sum()}")
+            with c2: st.metric("TOLAK",  f"{df_e['is_tolak'].sum()}")
+            with c3: st.metric("PENDING",f"{df_e['is_pending'].sum()}")
+
+            # Cross risk vs approver
+            cross = df_e.groupby(['risk_level','approver_status']).size().reset_index(name='n')
+            cross = cross[cross['approver_status'] != '']
+            if not cross.empty:
+                fig = px.bar(cross, x='risk_level', y='n', color='approver_status',
+                             title='Risk vs Keputusan Approver', barmode='group')
+                fig.update_layout(height=300)
+                st.plotly_chart(fig, use_container_width=True)
+
+            fn_rows = df_e[df_e['false_negative']==1]
+            if len(fn_rows):
+                st.error(f"🚨 {len(fn_rows)} False Negative — HIGH risk yang di-TERIMA approver!")
+                cols = ['tanggal_kirim','jenis','dist_km','anomaly_score','approver_status','catatan']
+                cols = [c for c in cols if c in fn_rows.columns]
+                st.dataframe(fn_rows[cols], use_container_width=True)
+
+    with t6:
+        cols_show = ['tanggal_kirim','jenis','lat','long','dist_km','anomaly_score',
+                     'risk_level','approver_status','false_negative',
+                     'outside_300m','very_far','extreme_far','far_no_note','catatan']
+        cols_show = [c for c in cols_show if c in df_e.columns]
+        st.dataframe(df_e[cols_show].sort_values('tanggal_kirim', ascending=False),
+                     use_container_width=True, height=400)
+        csv = df_e[cols_show].to_csv(index=False).encode('utf-8')
+        st.download_button(f"⬇️ Download Riwayat ID {sel_id}", csv,
+                           f"karyawan_{sel_id}.csv", "text/csv")
+
+# ── HUNT: SKPD ───────────────────────────────────────────────
+def _hunt_skpd(df, oc):
+    st.markdown("""<div class="section-header">
+        <span class="section-icon">🏢</span>
+        <div><div class="section-title">Hunt by SKPD</div>
+        <div class="section-desc">Leaderboard, heatmap, anomali kolektif, radar benchmark, analisis approver</div></div>
+    </div>""", unsafe_allow_html=True)
+
+    skpd_list = sorted(df['id_skpd'].unique().tolist())
+    sel_skpd  = st.selectbox("🏢 Pilih SKPD",
+                              skpd_list,
+                              format_func=lambda x: f"SKPD {x} ({len(df[df['id_skpd']==x]):,} absensi)",
+                              key='hunt_skpd_id')
+    df_s = df[df['id_skpd']==sel_skpd].copy()
+    if df_s.empty:
+        st.warning("Tidak ada data."); return
+
+    n_kar = df_s['karyawan_id'].nunique()
+    n_fn  = df_s['false_negative'].sum() if 'false_negative' in df_s.columns else 0
+    st.markdown(f"""
+    <div class="metric-grid">
+        <div class="metric-card info"><div class="metric-val">{len(df_s):,}</div><div class="metric-lbl">Total Absensi</div></div>
+        <div class="metric-card info"><div class="metric-val">{n_kar}</div><div class="metric-lbl">Karyawan</div></div>
+        <div class="metric-card danger"><div class="metric-val">{(df_s['risk_level']=='HIGH').sum():,}</div><div class="metric-lbl">HIGH Risk</div></div>
+        <div class="metric-card"><div class="metric-val">{(df_s['risk_level']=='HIGH').sum()/len(df_s)*100:.1f}%</div><div class="metric-lbl">% HIGH</div></div>
+        <div class="metric-card"><div class="metric-val">{df_s['dist_km'].mean():.3f} km</div><div class="metric-lbl">Avg Jarak</div></div>
+        <div class="metric-card {'danger' if n_fn>0 else ''}"><div class="metric-val">{n_fn}</div><div class="metric-lbl">False Neg.</div></div>
+    </div>""", unsafe_allow_html=True)
+
+    t1,t2,t3,t4,t5,t6 = st.tabs([
+        "🏆 Leaderboard","🔥 Heatmap","📏 Distribusi Jarak",
+        "📅 Anomali Kolektif","📡 Radar","📋 Approver SKPD"
+    ])
+
+    with t1:
+        agg = df_s.groupby('karyawan_id').agg(
+            total=('karyawan_id','count'),
+            high_count=('risk_level', lambda x: (x=='HIGH').sum()),
+            med_count=('risk_level',  lambda x: (x=='MED').sum()),
+            avg_score=('anomaly_score','mean'),
+            max_dist=('dist_km','max'),
+            n_tolak=('is_tolak','sum') if 'is_tolak' in df_s.columns else ('karyawan_id', lambda x: 0),
+            n_fn=('false_negative','sum') if 'false_negative' in df_s.columns else ('karyawan_id', lambda x: 0),
+        ).reset_index()
+        agg['high_pct'] = (agg['high_count']/agg['total']*100).round(1)
+        agg = agg.sort_values('high_count', ascending=False)
+
+        fig = px.bar(agg.head(15), x='karyawan_id', y=['high_count','med_count'],
+                     title=f'Leaderboard Anomali SKPD {sel_skpd}',
+                     color_discrete_map={'high_count':'#e74c3c','med_count':'#f39c12'},
+                     barmode='stack')
+        fig.update_xaxes(type='category')
+        fig.update_layout(height=360)
+        st.plotly_chart(fig, use_container_width=True)
+        st.dataframe(agg, use_container_width=True, height=320)
+
+    with t2:
+        m = folium.Map(location=[df_s['lat'].median(), df_s['long'].median()],
+                       zoom_start=13, tiles='CartoDB positron')
+        heat = [[r['lat'],r['long'],r.get('anomaly_score',1)+1] for _,r in df_s.iterrows()]
+        HeatMap(heat, radius=18, blur=12,
+                gradient={'0.0':'green','0.5':'yellow','1.0':'red'}).add_to(m)
+        if not oc.empty:
+            off = oc[oc['id_skpd']==sel_skpd]
+            if not off.empty:
+                o = off.iloc[0]
+                folium.Marker([o['office_lat'],o['office_long']],
+                              popup=f"Kantor SKPD {sel_skpd}",
+                              icon=folium.Icon(color='blue',icon='home',prefix='fa')).add_to(m)
+                folium.Circle([o['office_lat'],o['office_long']], radius=300,
+                              color='blue', fill=False, weight=2, dash_array='5').add_to(m)
+        st_folium(m, width=None, height=500, returned_objects=[])
+
+    with t3:
+        fig = px.box(df_s[df_s['dist_km']<=15], x='karyawan_id', y='dist_km', color='risk_level',
+                     title=f'Distribusi Jarak per Karyawan SKPD {sel_skpd}',
+                     color_discrete_map={'HIGH':'#e74c3c','MED':'#f39c12','LOW':'#27ae60'})
+        fig.add_hline(y=0.3, line_dash='dash', line_color='gray', annotation_text='300m')
+        fig.update_xaxes(type='category')
+        fig.update_layout(height=420)
+        st.plotly_chart(fig, use_container_width=True)
+
+    with t4:
+        if 'tanggal' in df_s.columns:
+            daily_col = df_s[df_s['outside_300m']==1].groupby('tanggal').agg(
+                n_karyawan=('karyawan_id','nunique'),
+                n_absensi=('karyawan_id','count'),
+                avg_score=('anomaly_score','mean')
+            ).reset_index().sort_values('n_karyawan', ascending=False)
+
+            threshold = max(2, int(n_kar*0.3))
+            massal = daily_col[daily_col['n_karyawan'] >= threshold]
+            if len(massal):
+                st.warning(f"⚠️ {len(massal)} hari — ≥{threshold} karyawan absen di luar kantor secara bersamaan!")
+                fig = px.bar(massal, x='tanggal', y='n_karyawan',
+                             color='avg_score', color_continuous_scale='Reds',
+                             title='Hari Anomali Massal')
+                fig.update_layout(height=320)
+                st.plotly_chart(fig, use_container_width=True)
+                st.dataframe(massal, use_container_width=True)
+            else:
+                st.success("✅ Tidak ada anomali kolektif massal.")
+
+            daily_all = df_s.groupby(['tanggal','risk_level']).size().reset_index(name='n')
+            fig2 = px.area(daily_all, x='tanggal', y='n', color='risk_level',
+                           title='Trend Harian Semua Absensi SKPD',
+                           color_discrete_map={'HIGH':'#e74c3c','MED':'#f39c12','LOW':'#27ae60'})
+            fig2.update_layout(height=300)
+            st.plotly_chart(fig2, use_container_width=True)
+
+    with t5:
+        all_agg = df.groupby('id_skpd').agg(
+            avg_score=('anomaly_score','mean'),
+            high_pct=('risk_level', lambda x: (x=='HIGH').mean()*100),
+            avg_dist=('dist_km','mean'),
+            far_pct=('outside_300m','mean'),
+            extreme_pct=('extreme_far','mean')
+        ).reset_index()
+        cur = all_agg[all_agg['id_skpd']==sel_skpd]
+        mean_v = all_agg.mean(numeric_only=True)
+        if not cur.empty:
+            c = cur.iloc[0]
+            cats = ['Avg Score','% HIGH','Avg Jarak×10','% Luar 300m','% Extreme']
+            vc = [c['avg_score'], c['high_pct'], c['avg_dist']*10, c['far_pct']*100, c['extreme_pct']*100]
+            vm = [mean_v['avg_score'], mean_v['high_pct'], mean_v['avg_dist']*10, mean_v['far_pct']*100, mean_v['extreme_pct']*100]
+            fig = go.Figure()
+            fig.add_trace(go.Scatterpolar(r=vc+[vc[0]], theta=cats+[cats[0]],
+                                          fill='toself', name=f'SKPD {sel_skpd}',
+                                          line=dict(color='#e74c3c',width=2)))
+            fig.add_trace(go.Scatterpolar(r=vm+[vm[0]], theta=cats+[cats[0]],
+                                          fill='toself', name='Rata-rata',
+                                          line=dict(color='#3498db',width=2), opacity=0.5))
+            fig.update_layout(polar=dict(radialaxis=dict(visible=True)),
+                              title=f'Radar SKPD {sel_skpd} vs Rata-rata', height=430)
+            st.plotly_chart(fig, use_container_width=True)
+
+    with t6:
+        if 'approver_status' in df_s.columns:
+            c1,c2,c3,c4 = st.columns(4)
+            with c1: st.metric("TERIMA", f"{df_s['is_terima'].sum():,}")
+            with c2: st.metric("TOLAK",  f"{df_s['is_tolak'].sum():,}")
+            with c3: st.metric("PENDING",f"{df_s['is_pending'].sum():,}")
+            with c4: st.metric("False Neg.", f"{n_fn:,}")
+
+            cross = df_s.groupby(['risk_level','approver_status']).size().reset_index(name='n')
+            cross = cross[cross['approver_status']!='']
+            if not cross.empty:
+                fig = px.bar(cross, x='risk_level', y='n', color='approver_status',
+                             title='Risk vs Approver SKPD Ini', barmode='group')
+                fig.update_layout(height=320)
+                st.plotly_chart(fig, use_container_width=True)
+
+            if n_fn > 0:
+                fn_rows = df_s[df_s['false_negative']==1]
+                st.error(f"🚨 {n_fn} False Negative di SKPD ini!")
+                cols = ['karyawan_id','tanggal_kirim','dist_km','anomaly_score','approver_status']
+                cols = [c for c in cols if c in fn_rows.columns]
+                st.dataframe(fn_rows[cols], use_container_width=True)
+
+# ── HUNT: TANGGAL ────────────────────────────────────────────
+def _hunt_tanggal(df, oc):
+    st.markdown("""<div class="section-header">
+        <span class="section-icon">📅</span>
+        <div><div class="section-title">Hunt by Tanggal</div>
+        <div class="section-desc">Snapshot harian, distribusi jam, daftar karyawan, deteksi titipan absensi</div></div>
+    </div>""", unsafe_allow_html=True)
+
+    if 'tanggal' not in df.columns:
+        st.warning("Kolom tanggal tidak tersedia."); return
+
+    min_d = df['tanggal'].min(); max_d = df['tanggal'].max()
+    col1,col2,col3 = st.columns([2,2,1])
+    with col1:
+        date_range = st.date_input("📅 Rentang Tanggal",
+                                   value=(max_d - timedelta(days=6), max_d),
+                                   min_value=min_d, max_value=max_d,
+                                   key='hunt_date_range')
+    with col2:
+        filter_risk = st.multiselect("Filter Risk", ['HIGH','MED','LOW'],
+                                     default=['HIGH','MED','LOW'], key='hunt_dt_risk')
+    with col3:
+        st.markdown("<br>", unsafe_allow_html=True)
+        approver_f = st.selectbox("Approver", ['Semua','TOLAK','False Negative','PENDING'],
+                                  key='hunt_dt_app') if 'approver_status' in df.columns else 'Semua'
+
+    d_start, d_end = (date_range if isinstance(date_range, tuple) and len(date_range)==2
+                      else (date_range, date_range))
+
+    df_d = df[(df['tanggal'].astype('datetime64[ns]') >= pd.Timestamp(d_start)) &
+              (df['tanggal'].astype('datetime64[ns]') <= pd.Timestamp(d_end))].copy()
+    if filter_risk:
+        df_d = df_d[df_d['risk_level'].isin(filter_risk)]
+    if approver_f == 'TOLAK' and 'is_tolak' in df_d.columns:
+        df_d = df_d[df_d['is_tolak']==1]
+    elif approver_f == 'False Negative' and 'false_negative' in df_d.columns:
+        df_d = df_d[df_d['false_negative']==1]
+    elif approver_f == 'PENDING' and 'is_pending' in df_d.columns:
+        df_d = df_d[df_d['is_pending']==1]
+
+    if df_d.empty:
+        st.warning("Tidak ada data pada rentang ini."); return
+
+    n_fn_d = df_d['false_negative'].sum() if 'false_negative' in df_d.columns else 0
+    st.markdown(f"""
+    <div class="metric-grid">
+        <div class="metric-card info"><div class="metric-val">{len(df_d):,}</div><div class="metric-lbl">Absensi</div></div>
+        <div class="metric-card info"><div class="metric-val">{df_d['karyawan_id'].nunique()}</div><div class="metric-lbl">Karyawan</div></div>
+        <div class="metric-card info"><div class="metric-val">{df_d['id_skpd'].nunique()}</div><div class="metric-lbl">SKPD</div></div>
+        <div class="metric-card danger"><div class="metric-val">{(df_d['risk_level']=='HIGH').sum():,}</div><div class="metric-lbl">HIGH</div></div>
+        <div class="metric-card {'danger' if n_fn_d>0 else ''}"><div class="metric-val">{n_fn_d}</div><div class="metric-lbl">False Neg.</div></div>
+    </div>""", unsafe_allow_html=True)
+
+    t1,t2,t3,t4 = st.tabs(["🗺️ Peta Snapshot","⏰ Distribusi Jam","🚨 Daftar Karyawan","🔍 Deteksi Titipan"])
+
+    with t1:
+        MAX = 1500
+        df_disp = df_d.sample(MAX, random_state=42) if len(df_d)>MAX else df_d
+        if len(df_d)>MAX: st.info(f"Menampilkan {MAX:,} dari {len(df_d):,} titik.")
+        m = folium.Map(location=[df_disp['lat'].median(), df_disp['long'].median()],
+                       zoom_start=13, tiles='CartoDB positron')
+        mc = MarkerCluster(name='Absensi').add_to(m)
+        for _,row in df_disp.iterrows():
+            c = risk_color_folium(row.get('risk_level','LOW'))
+            ec = 'gold' if row.get('false_negative',0)==1 else c
+            popup = f"""<div style='font-size:12px'>
+                <b>ID {row.get('karyawan_id','')} | SKPD {row.get('id_skpd','')}</b><br>
+                {str(row.get('tanggal_kirim',''))[:16]}<br>
+                Jarak: {row.get('dist_km',0):.3f} km | Score: {row.get('anomaly_score',0)}<br>
+                Risk: <b>{row.get('risk_level','')}</b> | Approver: {row.get('approver_status','-') or '-'}<br>
+                {'⚠️ FALSE NEGATIVE' if row.get('false_negative',0)==1 else ''}
+            </div>"""
+            folium.CircleMarker(
+                location=[row['lat'],row['long']],
+                radius=9 if row.get('risk_level')=='HIGH' else 6,
+                color=ec, fill=True, fill_color=c, fill_opacity=0.75,
+                popup=folium.Popup(popup, max_width=230)
+            ).add_to(mc)
+        if not oc.empty:
+            fg_off = folium.FeatureGroup(name='Kantor')
+            for _,o in oc.iterrows():
+                if pd.notna(o.get('office_lat')):
+                    folium.Marker([o['office_lat'],o['office_long']],
+                                  popup=f"SKPD {o['id_skpd']}",
+                                  icon=folium.Icon(color='blue',icon='home',prefix='fa')).add_to(fg_off)
+                    folium.Circle([o['office_lat'],o['office_long']], radius=300,
+                                  color='blue', fill=False, weight=1.5, dash_array='5').add_to(fg_off)
+            fg_off.add_to(m)
+        folium.LayerControl().add_to(m)
+        st_folium(m, width=None, height=500, returned_objects=[])
+
+    with t2:
+        if 'jam' in df_d.columns:
+            col_a,col_b = st.columns(2)
+            with col_a:
+                fig = px.bar(df_d.groupby(['jam','risk_level']).size().reset_index(name='n'),
+                             x='jam', y='n', color='risk_level', barmode='stack',
+                             title='Per Jam',
+                             color_discrete_map={'HIGH':'#e74c3c','MED':'#f39c12','LOW':'#27ae60'})
+                fig.add_vrect(x0=7,x1=9, fillcolor='green', opacity=0.07, annotation_text='Masuk')
+                fig.add_vrect(x0=15,x1=17, fillcolor='purple', opacity=0.07, annotation_text='Pulang')
+                fig.update_layout(height=360)
+                st.plotly_chart(fig, use_container_width=True)
+            with col_b:
+                if len(df_d['tanggal'].unique()) > 1:
+                    daily = df_d.groupby(['tanggal','risk_level']).size().reset_index(name='n')
+                    fig2 = px.line(daily, x='tanggal', y='n', color='risk_level', markers=True,
+                                   title='Trend Harian',
+                                   color_discrete_map={'HIGH':'#e74c3c','MED':'#f39c12','LOW':'#27ae60'})
+                    fig2.update_layout(height=360)
+                    st.plotly_chart(fig2, use_container_width=True)
+
+    with t3:
+        emp_day = df_d.groupby(['karyawan_id','id_skpd']).agg(
+            n_absensi=('karyawan_id','count'),
+            n_high=('risk_level', lambda x: (x=='HIGH').sum()),
+            max_score=('anomaly_score','max'),
+            avg_dist=('dist_km','mean'),
+            n_tolak=('is_tolak','sum') if 'is_tolak' in df_d.columns else ('karyawan_id', lambda x: 0),
+            n_fn=('false_negative','sum') if 'false_negative' in df_d.columns else ('karyawan_id', lambda x: 0),
+        ).reset_index().sort_values('n_high', ascending=False)
+
+        col_f1,col_f2 = st.columns(2)
+        with col_f1:
+            min_high = st.slider("Min HIGH risk", 0, max(1,int(emp_day['n_high'].max())), 1, key='hunt_dt_mh')
+        with col_f2:
+            sel_skpd_dt = st.selectbox("Filter SKPD", ['Semua']+sorted(df_d['id_skpd'].unique().tolist()), key='hunt_dt_sk')
+
+        emp_f = emp_day[emp_day['n_high'] >= min_high]
+        if sel_skpd_dt != 'Semua':
+            emp_f = emp_f[emp_f['id_skpd']==sel_skpd_dt]
+
+        st.caption(f"{len(emp_f)} karyawan")
+        st.dataframe(emp_f, use_container_width=True, height=380)
+        csv = emp_f.to_csv(index=False).encode('utf-8')
+        st.download_button("⬇️ Download", csv, f"karyawan_{d_start}_{d_end}.csv","text/csv")
+
+    with t4:
+        st.markdown("#### 🔍 Deteksi Absensi Titipan")
+        st.caption("Cari karyawan berbeda yang absen di lokasi sangat berdekatan pada waktu hampir sama.")
+        col_r1,col_r2 = st.columns(2)
+        with col_r1: radius_m  = st.slider("Radius lokasi (meter)", 5, 200, 50, 5, key='hunt_dt_rad')
+        with col_r2: window_m  = st.slider("Jendela waktu (menit)", 1, 60, 15, 1, key='hunt_dt_win')
+
+        n_check = len(df_d)
+        est_pairs = n_check*(n_check-1)//2
+        if est_pairs > 500000:
+            st.warning(f"⚠️ Data terlalu banyak ({n_check:,} baris, ~{est_pairs:,} pasangan). Perkecil rentang tanggal.")
+        elif st.button("🔍 Deteksi Sekarang", type="primary", key='hunt_dt_det'):
+            with st.spinner("⏳ Mendeteksi..."):
+                df_ck = df_d[['karyawan_id','id_skpd','lat','long','tanggal_kirim','jenis',
+                               'anomaly_score','risk_level']].dropna().copy()
+                rows_l = df_ck.to_dict('records')
+                n = len(rows_l)
+                suspicious = []
+                for i in range(n):
+                    for j in range(i+1, n):
+                        r1,r2 = rows_l[i],rows_l[j]
+                        if r1['karyawan_id']==r2['karyawan_id']: continue
+                        dm = haversine_scalar(r1['lat'],r1['long'],r2['lat'],r2['long'])
+                        if dm > radius_m: continue
+                        dt = abs((pd.Timestamp(r1['tanggal_kirim'])-pd.Timestamp(r2['tanggal_kirim'])).total_seconds())/60
+                        if dt <= window_m:
+                            suspicious.append({
+                                'Karyawan A': r1['karyawan_id'], 'Karyawan B': r2['karyawan_id'],
+                                'SKPD A': r1['id_skpd'], 'SKPD B': r2['id_skpd'],
+                                'Jarak (m)': round(dm,1), 'Selisih Waktu (mnt)': round(dt,1),
+                                'Lat': round(r1['lat'],5), 'Long': round(r1['long'],5),
+                                'Waktu A': str(r1['tanggal_kirim'])[:16],
+                                'Waktu B': str(r2['tanggal_kirim'])[:16],
+                                'Score A': r1['anomaly_score'], 'Score B': r2['anomaly_score'],
+                            })
+                        if len(suspicious) >= 300: break
+                    if len(suspicious) >= 300: break
+                st.session_state['kolusi_result'] = suspicious
+
+        if 'kolusi_result' in st.session_state:
+            kol = st.session_state['kolusi_result']
+            if not kol:
+                st.success("✅ Tidak ditemukan indikasi titipan.")
+            else:
+                st.error(f"🚨 {len(kol)} pasangan absensi mencurigakan!")
+                df_kol = pd.DataFrame(kol).sort_values('Jarak (m)')
+                # Peta titipan
+                m_k = folium.Map(location=[df_d['lat'].median(), df_d['long'].median()],
+                                 zoom_start=14, tiles='CartoDB positron')
+                for _,kr in df_kol.head(50).iterrows():
+                    folium.CircleMarker(
+                        location=[kr['Lat'],kr['Long']], radius=13,
+                        color='darkred', fill=True, fill_color='#e74c3c', fill_opacity=0.7,
+                        popup=f"{kr['Karyawan A']} & {kr['Karyawan B']}<br>{kr['Jarak (m)']}m | {kr['Selisih Waktu (mnt)']} mnt"
+                    ).add_to(m_k)
+                st_folium(m_k, width=None, height=360, returned_objects=[])
+                st.dataframe(df_kol, use_container_width=True, height=320)
+                csv_k = df_kol.to_csv(index=False).encode('utf-8')
+                st.download_button("⬇️ Download Hasil Deteksi", csv_k, "titipan.csv","text/csv")
 
 # ============================================================
 # PAGE: PREDIKSI
 # ============================================================
+def page_prediksi():
+    st.markdown("## 🔮 Prediksi Absensi Baru")
+    if 'df' not in st.session_state or st.session_state.df is None:
+        st.warning("⚠️ Upload data dulu di menu **📥 Upload Data**."); return
 
-def page_prediksi(params):
-    st.markdown("## 🔮 Prediksi Anomali Absensi")
-    st.markdown("Upload data absensi baru untuk diprediksi apakah termasuk anomali atau tidak.")
+    oc = st.session_state.get('office_centroid', pd.DataFrame())
+    if oc.empty:
+        st.error("Data kantor SKPD tidak tersedia."); return
 
-    if 'df_result' not in st.session_state or st.session_state.df_result is None:
-        st.warning("⚠️ Anda perlu menjalankan preprocessing terlebih dahulu di menu **📥 Upload & Preprocessing** agar sistem memiliki referensi kantor SKPD.")
-        return
+    st.info(f"✅ Referensi kantor tersedia untuk **{len(oc)} SKPD**")
 
-    log = st.session_state.get('log', {})
-    office_centroid = log.get('office_centroid', None)
+    pred_file = st.file_uploader("Upload file baru (opsional)", type=['csv','xlsx'], key='pred_up')
 
-    if office_centroid is None or len(office_centroid) == 0:
-        st.error("❌ Data kantor SKPD tidak tersedia. Jalankan preprocessing terlebih dahulu.")
-        return
-
-    st.info(f"✅ Referensi kantor tersedia untuk **{len(office_centroid)} SKPD**")
-
-    # Upload file prediksi
-    pred_file = st.file_uploader(
-        "Upload file absensi baru untuk diprediksi (CSV/Excel)",
-        type=['csv','xlsx'],
-        key='pred_upload'
-    )
-
-    # Input manual
-    st.markdown("### ✏️ Atau Input Manual")
-    with st.form("manual_input"):
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            m_karyawan = st.number_input("Karyawan ID", min_value=1, value=1001)
-            m_skpd     = st.number_input("ID SKPD", min_value=1, value=int(office_centroid['id_skpd'].iloc[0]))
-        with col2:
-            m_lat  = st.number_input("Latitude",  value=3.7, format="%.6f")
-            m_long = st.number_input("Longitude", value=98.6, format="%.6f")
-        with col3:
-            m_jenis   = st.selectbox("Jenis", ['M','P'], format_func=lambda x: 'Masuk' if x=='M' else 'Pulang')
+    st.markdown("### ✏️ Input Manual")
+    with st.form("manual_pred"):
+        c1,c2,c3 = st.columns(3)
+        with c1:
+            m_kar  = st.number_input("Karyawan ID", min_value=1, value=1001)
+            m_skpd = st.selectbox("ID SKPD", sorted(oc['id_skpd'].tolist()))
+        with c2:
+            m_lat  = st.number_input("Latitude",  value=float(oc['office_lat'].median()), format="%.6f")
+            m_long = st.number_input("Longitude", value=float(oc['office_long'].median()), format="%.6f")
+        with c3:
+            m_jenis   = st.selectbox("Jenis", ['M','P'], format_func=lambda x:'Masuk' if x=='M' else 'Pulang')
             m_waktu   = st.time_input("Jam Absensi")
-            m_catatan = st.text_input("Catatan (kosongkan jika tidak ada)", "")
-
+            m_catatan = st.text_input("Catatan (kosong jika tidak ada)", "")
+            m_approver = st.selectbox("Approver Status", ['','TERIMA','TOLAK'])
         submitted = st.form_submit_button("🔮 Prediksi", type="primary", use_container_width=True)
 
     if submitted:
-        # Buat dataframe dari input manual
-        df_pred = pd.DataFrame([{
-            'karyawan_id':   m_karyawan,
-            'id_skpd':       m_skpd,
-            'lat':           m_lat,
-            'long':          m_long,
-            'jenis':         m_jenis,
+        df_p = pd.DataFrame([{
+            'karyawan_id': m_kar, 'id_skpd': m_skpd,
+            'lat': m_lat, 'long': m_long, 'jenis': m_jenis,
             'tanggal_kirim': pd.Timestamp.now().replace(hour=m_waktu.hour, minute=m_waktu.minute, second=0),
-            'catatan':       m_catatan if m_catatan else np.nan,
-            'status_lokasi': 1
+            'catatan': m_catatan or np.nan, 'status_lokasi': 1,
+            'approver_status': m_approver
         }])
-        _predict_and_show(df_pred, office_centroid)
+        _run_prediction(df_p, oc, batch=False)
 
-    if pred_file is not None:
-        if pred_file.name.endswith('.csv'):
-            df_pred_file = pd.read_csv(pred_file)
-        else:
-            df_pred_file = pd.read_excel(pred_file)
-
-        st.markdown(f"### 📋 Prediksi Batch — {len(df_pred_file):,} baris")
+    if pred_file:
+        fb = pred_file.getvalue()
+        df_pf, _ = load_processed_file(fb, pred_file.name)
+        st.markdown(f"### Prediksi Batch — {len(df_pf):,} baris")
         if st.button("🚀 Jalankan Prediksi Batch", type="primary"):
-            with st.spinner("⏳ Memproses prediksi..."):
-                _predict_and_show(df_pred_file, office_centroid, batch=True)
+            with st.spinner("⏳ Memproses..."):
+                _run_prediction(df_pf, oc, batch=True)
 
-
-def _predict_and_show(df_input: pd.DataFrame, office_centroid: pd.DataFrame, batch=False):
-    """Prediksi anomali untuk data input baru."""
-    df = df_input.copy()
-
-    # Pastikan kolom dasar ada
+def _run_prediction(df_in, oc, batch=False):
+    df = df_in.copy()
     if 'tanggal_kirim' in df.columns:
         df['tanggal_kirim'] = pd.to_datetime(df['tanggal_kirim'], errors='coerce')
-        df['jam']         = df['tanggal_kirim'].dt.hour
-        df['menit']       = df['tanggal_kirim'].dt.minute
-        df['jam_desimal'] = df['jam'] + df['menit'] / 60.0
-    else:
-        df['jam_desimal'] = 8.0
+    if 'catatan' not in df.columns: df['catatan'] = np.nan
+    if 'status_lokasi' not in df.columns: df['status_lokasi'] = 1
 
-    if 'catatan' not in df.columns:
-        df['catatan'] = np.nan
-    if 'status_lokasi' not in df.columns:
-        df['status_lokasi'] = 1
-
-    # Merge kantor
-    df = df.merge(office_centroid, on='id_skpd', how='left')
-
-    # Hitung jarak
+    df = df.merge(oc, on='id_skpd', how='left')
     df['dist_km'] = df.apply(
-        lambda r: haversine_scalar(r['lat'], r['long'],
-                                   r.get('office_lat', r['lat']),
-                                   r.get('office_long', r['long']))
-        if pd.notna(r.get('office_lat')) else 0.0,
-        axis=1
-    )
+        lambda r: haversine_scalar(r['lat'],r['long'],
+                                   r.get('office_lat',r['lat']),
+                                   r.get('office_long',r['long']))/1000
+        if pd.notna(r.get('office_lat')) else 0.0, axis=1)
 
-    # Flags
-    df['outside_300m']     = (df['dist_km'] > 0.3).astype(int)
-    df['very_far']         = (df['dist_km'] > 5.0).astype(int)
-    df['extreme_far']      = (df['dist_km'] > 50.0).astype(int)
+    df['outside_300m']     = (df['dist_km']>0.3).astype(int)
+    df['very_far']         = (df['dist_km']>5.0).astype(int)
+    df['extreme_far']      = (df['dist_km']>50.0).astype(int)
     df['no_note']          = df['catatan'].isna().astype(int)
-    df['far_no_note']      = ((df['outside_300m']==1) & (df['no_note']==1)).astype(int)
-    df['far_with_note']    = ((df['outside_300m']==1) & (df['no_note']==0)).astype(int)
-    df['near_but_status0'] = ((df['outside_300m']==0) & (df['status_lokasi']==0)).astype(int)
+    df['far_no_note']      = ((df['outside_300m']==1)&(df['no_note']==1)).astype(int)
+    df['near_but_status0'] = ((df['outside_300m']==0)&(df['status_lokasi']==0)).astype(int)
+    df['anomaly_score']    = (df['outside_300m']*25 + df['far_no_note']*35 +
+                              df['very_far']*30 + df['extreme_far']*50 +
+                              df['near_but_status0']*5)
+    df['risk_level']       = df['anomaly_score'].apply(lambda s: 'HIGH' if s>=70 else 'MED' if s>=30 else 'LOW')
+    df['system_action']    = df['risk_level'].apply(
+        lambda r: '✅ AUTO APPROVE' if r=='LOW' else '⏸️ HOLD' if r=='MED' else '❌ TEMP REJECT')
 
-    # Scoring (tanpa cluster karena data baru)
-    df['anomaly_score'] = (
-        df['outside_300m']   * 25 +
-        df['far_no_note']    * 35 +
-        df['very_far']       * 30 +
-        df['extreme_far']    * 50 +
-        df['near_but_status0'] * 5
-    )
-
-    def risk_level(s):
-        if s >= 70:   return 'HIGH'
-        elif s >= 30: return 'MED'
-        else:         return 'LOW'
-
-    def system_action(risk):
-        if risk == 'LOW':   return '✅ AUTO APPROVE'
-        elif risk == 'MED': return '⏸️ HOLD (Perlu Review)'
-        else:               return '❌ TEMP REJECT + NOTIF APPROVER'
-
-    df['risk_level']    = df['anomaly_score'].apply(risk_level)
-    df['system_action'] = df['risk_level'].apply(system_action)
+    # Approver flags
+    if 'approver_status' in df.columns:
+        df['is_tolak']       = df['approver_status'].astype(str).str.upper().str.contains('TOLAK', na=False).astype(int)
+        df['is_terima']      = df['approver_status'].astype(str).str.upper().str.contains('TERIMA', na=False).astype(int)
+        df['false_negative'] = ((df['is_terima']==1)&(df['risk_level']=='HIGH')).astype(int)
 
     if not batch:
-        # Tampilan single prediction
         row = df.iloc[0]
         risk  = row['risk_level']
-        color = get_risk_color_hex(risk)
-
-        st.markdown("---")
-        st.markdown("### 🎯 Hasil Prediksi")
-
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Jarak ke Kantor", f"{row['dist_km']:.3f} km")
-        with col2:
-            st.metric("Anomaly Score", int(row['anomaly_score']))
-        with col3:
-            st.metric("Risk Level", risk)
-
+        color = risk_color_hex(risk)
+        st.markdown("---"); st.markdown("### 🎯 Hasil Prediksi")
+        c1,c2,c3 = st.columns(3)
+        with c1: st.metric("Jarak ke Kantor", f"{row['dist_km']:.3f} km")
+        with c2: st.metric("Anomaly Score",   int(row['anomaly_score']))
+        with c3: st.metric("Risk Level",       risk)
         action = row['system_action']
-        if risk == 'LOW':
-            st.success(f"**Aksi Sistem:** {action}")
-        elif risk == 'MED':
-            st.warning(f"**Aksi Sistem:** {action}")
-        else:
-            st.error(f"**Aksi Sistem:** {action}")
-
-        # Detail sinyal
-        st.markdown("**Detail Sinyal Anomali:**")
-        signals = {
-            'Di luar 300m':        int(row['outside_300m']),
-            'Jauh tanpa catatan':  int(row['far_no_note']),
-            'Sangat jauh (>5km)':  int(row['very_far']),
-            'Extreme (>50km)':     int(row['extreme_far']),
-            'Mismatch status':     int(row['near_but_status0']),
-        }
-        sig_df = pd.DataFrame(list(signals.items()), columns=['Sinyal','Aktif'])
-        sig_df['Status'] = sig_df['Aktif'].map({1:'⚠️ YA', 0:'✅ TIDAK'})
-        st.dataframe(sig_df[['Sinyal','Status']], use_container_width=True, hide_index=True)
-
-        # Mini peta
-        if pd.notna(row.get('office_lat')):
-            st.markdown("**Lokasi Absensi vs Kantor:**")
-            m = folium.Map(location=[row['lat'], row['long']], zoom_start=15)
-            folium.CircleMarker(
-                location=[row['lat'], row['long']], radius=10,
-                color=color, fill=True, fill_color=color, fill_opacity=0.8,
-                popup=f"Absensi — {risk}"
-            ).add_to(m)
-            folium.Marker(
-                location=[row['office_lat'], row['office_long']],
-                popup="Kantor SKPD",
-                icon=folium.Icon(color='blue', icon='home', prefix='fa')
-            ).add_to(m)
-            folium.Circle(
-                location=[row['office_lat'], row['office_long']],
-                radius=300, color='blue', fill=False, weight=2, dash_array='5'
-            ).add_to(m)
-            folium.PolyLine(
-                locations=[[row['lat'], row['long']], [row['office_lat'], row['office_long']]],
-                color='gray', weight=2, dash_array='5'
-            ).add_to(m)
-            st_folium(m, width=None, height=400, returned_objects=[])
-
+        (st.success if risk=='LOW' else st.warning if risk=='MED' else st.error)(f"**Aksi Sistem:** {action}")
+        fn = row.get('false_negative',0)
+        if fn:
+            st.error("🚨 FALSE NEGATIVE — TERIMA tapi HIGH risk! Perlu review manual.")
+        sigs = {'Di luar 300m':int(row['outside_300m']),'Jauh tanpa catatan':int(row['far_no_note']),
+                'Sangat jauh >5km':int(row['very_far']),'Extreme >50km':int(row['extreme_far'])}
+        sig_df = pd.DataFrame({'Sinyal':list(sigs.keys()),
+                               'Status':['⚠️ YA' if v else '✅ TIDAK' for v in sigs.values()]})
+        st.dataframe(sig_df, use_container_width=True, hide_index=True)
     else:
-        # Batch prediction
-        st.success(f"✅ Prediksi selesai untuk {len(df):,} baris")
-
-        col1, col2, col3 = st.columns(3)
-        with col1: st.metric("🔴 HIGH", f"{(df['risk_level']=='HIGH').sum():,}")
-        with col2: st.metric("🟡 MED",  f"{(df['risk_level']=='MED').sum():,}")
-        with col3: st.metric("🟢 LOW",  f"{(df['risk_level']=='LOW').sum():,}")
-
-        fig = px.pie(df['risk_level'].value_counts().reset_index(),
-                     values='count', names='risk_level', title='Distribusi Risk Level Prediksi',
-                     color='risk_level',
-                     color_discrete_map={'HIGH':'#e74c3c','MED':'#f39c12','LOW':'#27ae60'}, hole=0.4)
-        fig.update_layout(height=300)
-        st.plotly_chart(fig, use_container_width=True)
-
+        st.success(f"✅ Selesai untuk {len(df):,} baris")
+        c1,c2,c3,c4 = st.columns(4)
+        with c1: st.metric("HIGH", f"{(df['risk_level']=='HIGH').sum():,}")
+        with c2: st.metric("MED",  f"{(df['risk_level']=='MED').sum():,}")
+        with c3: st.metric("LOW",  f"{(df['risk_level']=='LOW').sum():,}")
+        with c4:
+            fn_b = df.get('false_negative', pd.Series([0]*len(df))).sum() if 'false_negative' in df.columns else 0
+            st.metric("False Neg.", f"{fn_b:,}")
         cols_show = ['karyawan_id','id_skpd','jenis','tanggal_kirim','lat','long',
-                     'dist_km','anomaly_score','risk_level','system_action','catatan']
+                     'dist_km','anomaly_score','risk_level','approver_status','false_negative','system_action']
         cols_show = [c for c in cols_show if c in df.columns]
-        st.dataframe(df[cols_show].sort_values('anomaly_score', ascending=False),
-                     use_container_width=True)
-
+        st.dataframe(df[cols_show].sort_values('anomaly_score',ascending=False), use_container_width=True)
         csv = df[cols_show].to_csv(index=False).encode('utf-8')
-        st.download_button("⬇️ Download Hasil Prediksi CSV", csv,
-                           "prediksi_anomali.csv", "text/csv", use_container_width=True)
-
+        st.download_button("⬇️ Download Hasil", csv, "prediksi.csv","text/csv")
 
 # ============================================================
 # MAIN
 # ============================================================
-
 def main():
-    # Init session state
-    if 'df_result' not in st.session_state:
-        st.session_state['df_result'] = None
-    if 'log' not in st.session_state:
-        st.session_state['log'] = {}
+    if 'df' not in st.session_state:             st.session_state['df'] = None
+    if 'office_centroid' not in st.session_state: st.session_state['office_centroid'] = pd.DataFrame()
+    if 'watchlist' not in st.session_state:       st.session_state['watchlist'] = []
 
-    # Sidebar
-    page, uploaded, params, filters = render_sidebar()
+    # ── AUTO-LOAD FILE LOKAL (saat pertama buka app) ──────────
+    if st.session_state['df'] is None and not st.session_state.get('_autoload_attempted'):
+        st.session_state['_autoload_attempted'] = True
+        local_files = scan_local_files()
+        if local_files:
+            chosen = local_files[0]
+            try:
+                df, fixed = load_local_file(chosen)
+                st.session_state['df']              = df
+                st.session_state['office_centroid'] = build_office_centroid(df)
+                st.session_state['_file_hash']      = chosen
+                st.session_state['file_name']       = chosen
+                st.session_state['_autoloaded']     = chosen
+            except Exception:
+                pass
 
-    # Jika ada file upload baru, simpan ke session state
+    page, uploaded, filters = render_sidebar()
+
+    # ── AUTO-LOAD FILE UPLOAD BARU ────────────────────────────
     if uploaded is not None:
-        st.session_state['uploaded_file'] = uploaded
+        fhash = hashlib.md5(uploaded.getvalue()).hexdigest()
+        if st.session_state.get('_file_hash') != fhash:
+            file_bytes = uploaded.getvalue()
+            df, fixed = load_processed_file(file_bytes, uploaded.name)
+            st.session_state['df']              = df
+            st.session_state['office_centroid'] = build_office_centroid(df)
+            st.session_state['_file_hash']      = fhash
+            st.session_state['file_name']       = uploaded.name
+            st.session_state.pop('_autoloaded', None)
 
-    # Routing halaman
+    # ── BANNER FILE AKTIF DI SIDEBAR ─────────────────────────
+    if st.session_state.get('_autoloaded') and st.session_state['df'] is not None:
+        fname = st.session_state['_autoloaded']
+        n     = len(st.session_state['df'])
+        st.sidebar.success(f"\u2705 Auto-loaded: **{fname}**\n{n:,} baris")
+
     if page == "🏠 Beranda":
         page_beranda()
-    elif page == "📥 Upload & Preprocessing":
-        page_preprocessing(uploaded, params)
+    elif page == "📥 Upload Data":
+        page_upload(uploaded)
     elif page == "📊 Visualisasi":
         page_visualisasi(filters)
+    elif page == "🎯 Hunting":
+        page_hunting()
     elif page == "🔮 Prediksi":
-        page_prediksi(params)
+        page_prediksi()
 
     st.markdown("---")
-    st.markdown(
-        '<p style="text-align:center;color:gray;font-size:12px">'
-        'Deteksi Anomali Absensi | DBSCAN + ST-DBSCAN + Haversine | Streamlit + Folium + Plotly'
-        '</p>', unsafe_allow_html=True
-    )
-
-
+    st.markdown('<p style="text-align:center;color:gray;font-size:11px">'
+                'Deteksi Anomali Absensi | DBSCAN + ST-DBSCAN + Haversine | Streamlit + Folium + Plotly'
+                '</p>', unsafe_allow_html=True)
 if __name__ == '__main__':
     main()
