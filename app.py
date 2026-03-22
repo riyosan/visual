@@ -100,17 +100,33 @@ STATUS_EMOJI = {
     'UNKNOWN':             '⚪',
 }
 
-STATUS_FOLIUM = {
-    'TELAT_BERAT':         'red',
-    'TELAT_SEDANG':        'orange',
-    'TELAT_RINGAN':        'lightred',
-    'TEPAT_WAKTU_MASUK':   'green',
-    'TEPAT_WAKTU_PULANG':  'green',
-    'PULANG_CEPAT':        'lightred',
-    'PULANG_CEPAT_RINGAN': 'lightred',
-    'PULANG_CEPAT_SEDANG': 'orange',
-    'PULANG_CEPAT_BERAT':  'red',
-    'UNKNOWN':             'gray',
+# Warna hex langsung untuk CircleMarker (lebih fleksibel dari nama folium)
+STATUS_FOLIUM_HEX = {
+    # MASUK — skema biru/hijau/merah sesuai tingkat ketepatan
+    'TEPAT_WAKTU_MASUK':   '#27ae60',   # hijau solid
+    'TELAT_RINGAN':        '#f1c40f',   # kuning
+    'TELAT_SEDANG':        '#e67e22',   # oranye
+    'TELAT_BERAT':         '#c0392b',   # merah tua
+    # PULANG — skema teal/ungu/merah agar beda dari masuk
+    'TEPAT_WAKTU_PULANG':  '#1abc9c',   # teal (beda dari hijau masuk)
+    'PULANG_CEPAT':        '#9b59b6',   # ungu muda
+    'PULANG_CEPAT_RINGAN': '#8e44ad',   # ungu
+    'PULANG_CEPAT_SEDANG': '#e74c3c',   # merah
+    'PULANG_CEPAT_BERAT':  '#922b21',   # merah sangat tua
+    'UNKNOWN':             '#95a5a6',   # abu
+}
+
+STATUS_FOLIUM_HEX = {
+    'TEPAT_WAKTU_MASUK':   '#27ae60',
+    'TELAT_RINGAN':        '#f1c40f',
+    'TELAT_SEDANG':        '#e67e22',
+    'TELAT_BERAT':         '#c0392b',
+    'TEPAT_WAKTU_PULANG':  '#1abc9c',
+    'PULANG_CEPAT':        '#9b59b6',
+    'PULANG_CEPAT_RINGAN': '#8e44ad',
+    'PULANG_CEPAT_SEDANG': '#e74c3c',
+    'PULANG_CEPAT_BERAT':  '#922b21',
+    'UNKNOWN':             '#95a5a6',
 }
 
 # ============================================================
@@ -244,7 +260,7 @@ def haversine(lat1, lon1, lat2, lon2):
 
 def status_color(s):   return STATUS_COLORS.get(s, '#95a5a6')
 def status_emoji(s):   return STATUS_EMOJI.get(s, '⚪')
-def status_folium_color(s): return STATUS_FOLIUM.get(s, 'gray')
+def status_folium_color(s): return STATUS_FOLIUM_HEX.get(s, '#95a5a6')
 def is_bermasalah(s):  return s in STATUS_BERMASALAH
 
 def _df_hash(df):
@@ -288,7 +304,6 @@ def fix_decimal_columns(df):
 # LOAD & PROCESS
 # ============================================================
 
-@st.cache_data(show_spinner=False, ttl=3600)
 def load_processed_file(file_bytes, file_name):
     buf = io.BytesIO(file_bytes)
     if file_name.endswith('.csv'):
@@ -367,11 +382,25 @@ def load_processed_file(file_bytes, file_name):
         df['is_tolak']   = df['approver_status'].str.upper().str.contains('TOLAK', na=False).astype(int)
         df['is_terima']  = df['approver_status'].str.upper().str.contains('TERIMA', na=False).astype(int)
         df['is_pending'] = ((df['approver_status'] == '') | df['approver_status'].isna()).astype(int)
-        df['terima_bermasalah'] = ((df['is_terima'] == 1) & (df['is_bermasalah'] == 1)).astype(int)
     else:
-        df['is_tolak'] = df['is_terima'] = df['is_pending'] = df['terima_bermasalah'] = 0
+        df['is_tolak'] = df['is_terima'] = df['is_pending'] = 0
 
-    if 'dist_km' in df.columns:
+    if 'dist_km' in df.columns and 'lat' in df.columns and 'office_lat' in df.columns:
+        # Recalculate dist_km dari koordinat jika nilainya tidak masuk akal
+        # (bug hav() lama menghasilkan 9530 km padahal harusnya < 1 km untuk absensi normal)
+        median_dist = df['dist_km'].median()
+        if median_dist > 100:
+            # Hitung ulang dengan formula yang benar
+            rlat1 = np.radians(df['lat'].values)
+            rlat2 = np.radians(df['office_lat'].values)
+            rlon1 = np.radians(df['long'].values)
+            rlon2 = np.radians(df['office_long'].values)
+            a = np.sin((rlat2-rlat1)/2)**2 + np.cos(rlat1)*np.cos(rlat2)*np.sin((rlon2-rlon1)/2)**2
+            df['dist_km'] = 6371.0 * 2 * np.arcsin(np.sqrt(np.clip(a, 0, 1)))
+            remaps.append(f"🔧 dist_km dihitung ulang dari koordinat (nilai lama median={median_dist:.0f})")
+        df['outside_300m'] = (df['dist_km'] > 0.3).astype(int)
+        df['very_far']     = (df['dist_km'] > 5.0).astype(int)
+    elif 'dist_km' in df.columns:
         df['outside_300m'] = (df['dist_km'] > 0.3).astype(int)
         df['very_far']     = (df['dist_km'] > 5.0).astype(int)
 
@@ -380,7 +409,16 @@ def load_processed_file(file_bytes, file_name):
 
 def build_office_centroid(df):
     if 'office_lat' in df.columns and 'id_skpd' in df.columns:
+        # Pakai office_lat/long hasil preprocessing (paling akurat)
         return df.groupby('id_skpd')[['office_lat', 'office_long']].first().reset_index()
+    elif 'id_skpd' in df.columns and 'lat' in df.columns:
+        # Fallback: estimasi dari median koordinat absensi MASUK per SKPD
+        src = df[df['jenis'] == 'M'] if 'jenis' in df.columns and (df['jenis'] == 'M').any() else df
+        oc = src.groupby('id_skpd').agg(
+            office_lat=('lat', 'median'),
+            office_long=('long', 'median')
+        ).reset_index()
+        return oc
     return pd.DataFrame(columns=['id_skpd', 'office_lat', 'office_long'])
 
 
@@ -398,7 +436,6 @@ def validate_dataframe(df):
 # FILTER
 # ============================================================
 
-@st.cache_data(show_spinner=False, ttl=3600)
 def apply_filters(df_hash, df, skpd, jenis_tuple, date_range,
                   dist_range, approver_filter, status_filter):
     f = df.copy()
@@ -415,19 +452,29 @@ def apply_filters(df_hash, df, skpd, jenis_tuple, date_range,
         if approver_filter == 'TOLAK':       f = f[f['is_tolak'] == 1]
         elif approver_filter == 'TERIMA':    f = f[f['is_terima'] == 1]
         elif approver_filter == 'PENDING':   f = f[f['is_pending'] == 1]
-        elif approver_filter == 'Terima Bermasalah': f = f[f['terima_bermasalah'] == 1]
     if status_filter:
-        f = f[f['status_presensi'].isin(status_filter)]
+        # Auto-map kode mentah jika perlu (jaga-jaga df auto-loaded belum termapping)
+        all_vals = set(f['status_presensi'].unique())
+        filter_set = set(status_filter)
+        # Cek apakah ada overlap antara filter_set dan data
+        if filter_set and not filter_set.intersection(all_vals):
+            # Tidak ada overlap - coba map kode mentah dulu
+            f['status_presensi'] = f['status_presensi'].apply(map_status_value)
+            all_vals = set(f['status_presensi'].unique())
+        if filter_set and filter_set != all_vals:
+            f = f[f['status_presensi'].isin(filter_set)]
     return f
 
 # ============================================================
 # LOCAL FILES
 # ============================================================
 
+# File preprocessed diprioritaskan agar auto-load pakai data yang sudah siap
 CANDIDATE_FILES = [
+    'absensi_preprocessed.csv', 'absensi_preprocessed.xlsx',
+    'absensi_processed.csv', 'absensi_processed.xlsx',
     'dataset_absensi_final2.xlsx', 'absen_pegawai.xlsx',
-    'absensi.xlsx', 'absensi_processed.xlsx', 'absensi_processed.csv',
-    'absensi.csv', 'data_absensi.xlsx', 'data_absensi.csv',
+    'absensi.xlsx', 'absensi.csv', 'data_absensi.xlsx', 'data_absensi.csv',
 ]
 
 def scan_local_files():
@@ -438,7 +485,6 @@ def scan_local_files():
         if fn.endswith(('.xlsx', '.csv')) and fn not in found: found.append(fn)
     return found
 
-@st.cache_data(show_spinner=False, ttl=3600)
 def load_local_file(filepath):
     with open(filepath, 'rb') as f:
         fb = f.read()
@@ -451,11 +497,13 @@ def load_local_file(filepath):
 def render_sidebar():
     st.sidebar.markdown("## 🗺️ Analisis Absensi")
     st.sidebar.markdown("---")
-    page = st.sidebar.radio("📌 Navigasi", [
-        "🏠 Beranda", "📥 Upload Data", "🔧 Preprocessing", "📊 Visualisasi", "🎯 Hunting", "🔮 Prediksi"])
+    nav_pages = ["🏠 Beranda", "🔧 Preprocessing", "📥 Upload Data", "📊 Visualisasi", "🎯 Hunting"]
+    # Jika ada nav_target, highlight halaman tujuan di sidebar
+    forced = st.session_state.get('_nav_target')
+    default_idx = nav_pages.index(forced) if forced and forced in nav_pages else 0
+    page = st.sidebar.radio("📌 Navigasi", nav_pages, index=default_idx)
     st.sidebar.markdown("---")
-    st.sidebar.markdown("### 📂 Upload Data")
-    uploaded = st.sidebar.file_uploader("Upload CSV / Excel", type=['csv', 'xlsx'])
+    uploaded = None
     filters = {}
     if 'df' in st.session_state and st.session_state.df is not None:
         df = st.session_state.df
@@ -463,9 +511,12 @@ def render_sidebar():
             skpd_list = ['Semua'] + sorted(df['id_skpd'].unique().tolist())
             filters['skpd'] = st.selectbox("SKPD", skpd_list)
             all_status = sorted(df['status_presensi'].dropna().unique().tolist())
-            filters['status'] = st.multiselect(
+            # Default = semua status yang ada (None = tidak filter)
+            sel_status = st.multiselect(
                 "Status Presensi", all_status, default=all_status,
                 format_func=lambda x: f"{status_emoji(x)} {x}")
+            # None kalau semua dipilih = skip filter sepenuhnya
+            filters['status'] = None if set(sel_status) == set(all_status) else sel_status
             filters['jenis'] = st.multiselect(
                 "Jenis", ['M', 'P'], default=['M', 'P'],
                 format_func=lambda x: 'Masuk' if x == 'M' else 'Pulang')
@@ -481,7 +532,7 @@ def render_sidebar():
                                         min(mx_d, 100.0), (0.0, min(mx_d, 100.0)), 0.1)
             if 'approver_status' in df.columns:
                 filters['approver'] = st.selectbox(
-                    "Approver", ['Semua', 'TERIMA', 'TOLAK', 'PENDING', 'Terima Bermasalah'])
+                    "Approver", ['Semua', 'TERIMA', 'TOLAK', 'PENDING'])
             else:
                 filters['approver'] = 'Semua'
         with st.sidebar.expander("🗺️ Peta", expanded=False):
@@ -498,12 +549,12 @@ def render_sidebar():
                 ed = df[df['karyawan_id'] == eid]
                 nb = ed['is_bermasalah'].sum() if not ed.empty else 0
                 st.sidebar.markdown(f"""<div class='watchlist-item'>
-                    <span>🔴</span><span><b>ID {eid}</b> — {nb} bermasalah</span>
+                    <span>🔴</span><span><b>ID {eid}</b> — {nb} indiscipline</span>
                 </div>""", unsafe_allow_html=True)
             if st.sidebar.button("🗑️ Clear Watchlist"):
                 st.session_state['watchlist'] = []
                 st.rerun()
-    return page, uploaded, filters
+    return page, filters
 
 # ============================================================
 # BERANDA
@@ -514,11 +565,10 @@ def page_beranda():
     st.markdown('<p class="sub-header">Upload data → status otomatis terpetakan dari kode mesin</p>',
                 unsafe_allow_html=True)
 
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3 = st.columns(3)
     with c1: st.info("### 📥 Step 1\n**Upload Data**")
     with c2: st.success("### 📊 Step 2\n**Visualisasi**")
     with c3: st.warning("### 🎯 Step 3\n**Hunting**")
-    with c4: st.error("### 🔮 Step 4\n**Prediksi**")
 
     st.markdown("---")
     st.markdown("### 📋 Mapping Kode → Label (dari kolom `status_presensi`)")
@@ -559,8 +609,10 @@ def page_beranda():
 # UPLOAD
 # ============================================================
 
-def page_upload(uploaded):
+def page_upload():
     st.markdown("## 📥 Upload Data Absensi")
+    if st.session_state.get('df') is None:
+        st.info("💡 **Punya data mentah?** Gunakan halaman **🔧 Preprocessing** dulu, lalu klik Simpan & Load — otomatis masuk Visualisasi tanpa perlu Upload manual.")
     local_files = scan_local_files()
     if local_files:
         st.success(f"📂 **{len(local_files)} file** ditemukan di direktori.")
@@ -574,16 +626,44 @@ def page_upload(uploaded):
         if load_clicked:
             with st.spinner(f"⏳ Memuat {chosen}..."):
                 df, fc, remaps = load_local_file(chosen)
+            # Simpan ke session dulu sebelum render
+            st.session_state['df'] = df
+            st.session_state['office_centroid'] = build_office_centroid(df)
+            st.session_state['file_name'] = chosen
+            st.session_state['_loaded_df']  = df
+            st.session_state['_loaded_fc']  = fc
+            st.session_state['_loaded_rem'] = remaps
+            st.session_state['_loaded_src'] = chosen
             _finalize(df, fc, remaps, chosen)
             return
 
-    if uploaded is None:
-        st.info("💡 Upload file via sidebar atau pilih file lokal di atas.")
+    # ── Upload via halaman ini ────────────────────────────────
+    st.markdown("---")
+    st.markdown("### ⬆️ Upload File Baru")
+    uploaded_page = st.file_uploader("Upload CSV / Excel", type=['csv','xlsx'], key='ul_page')
+    if uploaded_page is not None:
+        with st.spinner("⏳ Memuat file..."):
+            df, fc, remaps = load_processed_file(uploaded_page.getvalue(), uploaded_page.name)
+        st.session_state['df'] = df
+        st.session_state['office_centroid'] = build_office_centroid(df)
+        st.session_state['file_name'] = uploaded_page.name
+        st.session_state['_loaded_df']  = df
+        st.session_state['_loaded_fc']  = fc
+        st.session_state['_loaded_rem'] = remaps
+        st.session_state['_loaded_src'] = uploaded_page.name
+        _finalize(df, fc, remaps, uploaded_page.name)
         return
 
-    with st.spinner("⏳ Memuat file..."):
-        df, fc, remaps = load_processed_file(uploaded.getvalue(), uploaded.name)
-    _finalize(df, fc, remaps, uploaded.name)
+    # Jika ada data yang sudah diload sebelumnya, tampilkan lagi
+    if st.session_state.get('_loaded_df') is not None:
+        _finalize(
+            st.session_state['_loaded_df'],
+            st.session_state.get('_loaded_fc', []),
+            st.session_state.get('_loaded_rem', []),
+            st.session_state.get('_loaded_src', ''))
+        return
+
+    st.info("💡 Pilih file lokal di atas atau upload file baru.")
 
 
 def _finalize(df, fixed_cols, remaps, source):
@@ -624,7 +704,7 @@ def _finalize(df, fixed_cols, remaps, source):
     nb = df['is_bermasalah'].sum()
     if nb > 0:
         st.markdown(f"""<div class='alert-box alert-red'>
-        🚨 <b>{nb:,}</b> absensi bermasalah (TELAT_BERAT / TELAT_SEDANG / PULANG_CEPAT_SEDANG / PULANG_CEPAT_BERAT)
+        🚨 <b>{nb:,}</b> absensi indiscipline (TELAT_BERAT / TELAT_SEDANG / PULANG_CEPAT_SEDANG / PULANG_CEPAT_BERAT)
         </div>""", unsafe_allow_html=True)
 
     if 'approver_status' in df.columns:
@@ -633,18 +713,15 @@ def _finalize(df, fixed_cols, remaps, source):
         with ac1: st.metric("✅ TERIMA",           f"{df['is_terima'].sum():,}")
         with ac2: st.metric("❌ TOLAK",             f"{df['is_tolak'].sum():,}")
         with ac3: st.metric("⏳ PENDING",           f"{df['is_pending'].sum():,}")
-        with ac4: st.metric("🚨 Terima Bermasalah", f"{df['terima_bermasalah'].sum():,}")
+
 
     with st.expander("🔍 Preview Data (10 baris)", expanded=False):
-        cols_preview = [c for c in ['karyawan_id', 'id_skpd', 'jenis', 'tanggal_kirim',
-                                     'status_presensi', 'dist_km', 'approver_status']
-                        if c in df.columns]
-        st.dataframe(df[cols_preview].head(10), use_container_width=True)
+        st.dataframe(df.head(10), use_container_width=True)
 
     if st.button("✅ Gunakan Data Ini", type="primary", use_container_width=True):
-        st.session_state['df'] = df
-        st.session_state['office_centroid'] = build_office_centroid(df)
-        st.session_state['file_name'] = source
+        # df sudah tersimpan di session saat load — tinggal navigasi
+        st.session_state['_manual_load'] = True
+        # nav removed
         st.rerun()
 
 # ============================================================
@@ -656,9 +733,7 @@ def build_popup(row):
     c  = status_color(s)
     e  = status_emoji(s)
     d  = row.get('dist_km', 0)
-    tb = row.get('terima_bermasalah', 0)
-    tb_h = ("<tr><td colspan=2><b style='color:#c0392b'>⚠️ TERIMA BERMASALAH!</b></td></tr>"
-            if tb else "")
+    tb_h = ""
     return f"""<div style='font-family:Arial;font-size:12px;min-width:240px'>
       <h4 style='margin:0 0 8px;color:#2c3e50'>📋 Detail</h4>
       <table style='width:100%;border-collapse:collapse'>
@@ -677,53 +752,82 @@ def build_popup(row):
 def create_folium_map(df, map_type='marker', oc=None):
     m = folium.Map(location=[df['lat'].median(), df['long'].median()],
                    zoom_start=13, tiles='CartoDB positron')
-    folium.TileLayer('OpenStreetMap', name='OSM').add_to(m)
+
+    # Normalize status dulu (handle kode mentah T2/TWM dll)
+    df = df.copy()
+    if 'status_presensi' in df.columns:
+        needs_map = ~df['status_presensi'].isin(STATUS_ORDER)
+        if needs_map.any():
+            df.loc[needs_map, 'status_presensi'] = (
+                df.loc[needs_map, 'status_presensi'].apply(map_status_value))
 
     if map_type == 'heatmap':
         HeatMap([[r['lat'], r['long'], 1 + r.get('is_bermasalah', 0)*3]
                  for _, r in df.iterrows()], radius=15, blur=10).add_to(m)
-    elif map_type == 'cluster':
-        mc = MarkerCluster(name='Absensi').add_to(m)
-        for _, row in df.iterrows():
-            fc = status_folium_color(row.get('status_presensi', ''))
-            folium.CircleMarker([row['lat'], row['long']], radius=7,
-                color=fc, fill=True, fill_color=fc, fill_opacity=0.75,
-                popup=folium.Popup(build_popup(row), max_width=280)).add_to(mc)
-    else:
-        present = df['status_presensi'].unique()
-        for s in STATUS_ORDER:
-            if s not in present: continue
-            fg = folium.FeatureGroup(name=f'{status_emoji(s)} {s}')
-            fc = status_folium_color(s)
-            berm = is_bermasalah(s)
-            for _, row in df[df['status_presensi'] == s].iterrows():
-                ec = 'gold' if row.get('terima_bermasalah', 0) == 1 else fc
-                folium.CircleMarker([row['lat'], row['long']],
-                    radius=9 if berm else 6,
-                    color=ec, fill=True, fill_color=fc, fill_opacity=0.75,
-                    popup=folium.Popup(build_popup(row), max_width=280)).add_to(fg)
-            fg.add_to(m)
-        unk = df[~df['status_presensi'].isin(STATUS_ORDER)]
-        if not unk.empty:
-            fg = folium.FeatureGroup(name='⚪ Lainnya')
-            for _, row in unk.iterrows():
-                folium.CircleMarker([row['lat'], row['long']], radius=5,
-                    color='gray', fill=True, fill_color='gray', fill_opacity=0.5,
-                    popup=folium.Popup(build_popup(row), max_width=280)).add_to(fg)
-            fg.add_to(m)
 
+    elif map_type == 'cluster':
+        mc = MarkerCluster().add_to(m)
+        for _, row in df.iterrows():
+            s     = row.get('status_presensi', '')
+            jenis = row.get('jenis', '')
+            fc    = status_folium_color(s)
+            border_color = fc if jenis == 'M' else 'white'
+            border_w     = 1.5 if jenis == 'M' else 3
+            folium.CircleMarker(
+                [row['lat'], row['long']], radius=7,
+                color=border_color, weight=border_w,
+                fill=True, fill_color=fc, fill_opacity=0.85,
+                tooltip=f"{'🟢 Masuk' if jenis=='M' else '🔴 Pulang'} | {s}",
+                popup=folium.Popup(build_popup(row), max_width=280)
+            ).add_to(mc)
+
+    else:
+        # Marker mode — warna dari status_presensi, bentuk beda untuk M vs P
+        for _, row in df.iterrows():
+            s     = row.get('status_presensi', '')
+            jenis = row.get('jenis', '')
+            fc    = status_folium_color(s)
+            berm  = is_bermasalah(s)
+            r     = 9 if berm else 6
+
+            if jenis == 'M':
+                # MASUK: border tipis sesuai warna (solid)
+                border_color = fc
+                border_w     = 1.5
+            else:
+                # PULANG: border putih tebal agar terlihat beda
+                border_color = 'white'
+                border_w     = 3
+
+            folium.CircleMarker(
+                [row['lat'], row['long']],
+                radius=r,
+                color=border_color,
+                weight=border_w,
+                fill=True,
+                fill_color=fc,
+                fill_opacity=0.85,
+                tooltip=f"{'🟢 Masuk' if jenis=='M' else '🔴 Pulang'} | {status_emoji(s)} {s}",
+                popup=folium.Popup(build_popup(row), max_width=280)
+            ).add_to(m)
+
+    # Kantor & radius 300m — langsung ke map agar selalu visible
     if oc is not None and len(oc):
-        fg_o = folium.FeatureGroup(name='🏢 Kantor')
         for _, o in oc.iterrows():
             if pd.notna(o.get('office_lat')):
-                folium.Marker([o['office_lat'], o['office_long']],
+                folium.Marker(
+                    [o['office_lat'], o['office_long']],
                     popup=f"SKPD {o['id_skpd']}",
-                    icon=folium.Icon(color='blue', icon='home', prefix='fa')).add_to(fg_o)
-                folium.Circle([o['office_lat'], o['office_long']], radius=300,
-                    color='#3498db', fill=False, weight=2, dash_array='5').add_to(fg_o)
-        fg_o.add_to(m)
+                    tooltip=f"Kantor SKPD {o['id_skpd']}",
+                    icon=folium.Icon(color='blue', icon='home', prefix='fa')
+                ).add_to(m)
+                folium.Circle(
+                    [o['office_lat'], o['office_long']], radius=300,
+                    color='#3498db', fill=True, fill_color='#3498db',
+                    fill_opacity=0.05, weight=2, dash_array='6',
+                    tooltip=f"Radius 300m SKPD {o['id_skpd']}"
+                ).add_to(m)
 
-    folium.LayerControl().add_to(m)
     return m
 
 # ============================================================
@@ -762,12 +866,9 @@ def _vis_overview(df):
     c1, c2, c3, c4 = st.columns(4)
     with c1: st.metric("Total", f"{n:,}")
     with c2: st.metric("Karyawan", f"{df['karyawan_id'].nunique():,}")
-    with c3: st.metric("🔴🟠 Bermasalah", f"{nb:,}")
+    with c3: st.metric("🔴🟠 Indiscipline", f"{nb:,}")
     with c4: st.metric("🟢🟡 OK", f"{n - nb:,}")
-    if df['terima_bermasalah'].sum() > 0:
-        st.markdown(f"""<div class='alert-box alert-red'>
-        🚨 <b>{df['terima_bermasalah'].sum():,} Terima Bermasalah</b>
-        </div>""", unsafe_allow_html=True)
+
     cl, cr = st.columns(2)
     with cl:
         vc = df['status_presensi'].value_counts().reset_index()
@@ -809,11 +910,19 @@ def _vis_overview(df):
 
 def _vis_map(df, filters, oc):
     if df.empty: st.warning("Tidak ada data."); return
+    # Jika oc kosong, build ulang dari data saat ini
+    if oc is None or (hasattr(oc, '__len__') and len(oc) == 0):
+        oc = build_office_centroid(df)
     MAX = 2000
     dfd = df.sample(MAX, random_state=42) if len(df) > MAX else df
     if len(df) > MAX: st.info(f"Menampilkan {MAX:,} dari {len(df):,} titik.")
     m = create_folium_map(dfd, filters.get('map_type', 'marker'), oc)
     st_folium(m, width=None, height=560, returned_objects=[])
+    st.markdown(
+        "🟢 **Masuk** — border tipis sesuai warna &nbsp;|&nbsp; "
+        "⚪ **Pulang** — border putih tebal &nbsp;|&nbsp; "
+        "🔵 **Ikon rumah** — Kantor SKPD",
+        help="Warna titik = status presensi | Bentuk border = jenis absensi")
 
 
 def _vis_temporal(df):
@@ -845,33 +954,45 @@ def _vis_temporal(df):
 
 def _vis_distance(df):
     if 'dist_km' not in df.columns: st.warning("Kolom dist_km tidak ada."); return
-    c1,c2,c3,c4 = st.columns(4)
-    with c1: st.metric("Rata-rata", f"{df['dist_km'].mean():.3f} km")
-    with c2: st.metric("Median",    f"{df['dist_km'].median():.3f} km")
-    with c3: st.metric("Maks",      f"{df['dist_km'].max():.3f} km")
-    with c4: st.metric(">300m",     f"{(df['dist_km']>0.3).sum():,}")
+
+    # ── Metric ringkasan ──────────────────────────────────────
+    n_out = (df['dist_km'] > 0.3).sum()
+    n_far = (df['dist_km'] > 5.0).sum() if 'very_far' not in df.columns else df['very_far'].sum()
+    c1,c2,c3,c4,c5 = st.columns(5)
+    with c1: st.metric("Rata-rata",     f"{df['dist_km'].mean():.3f} km")
+    with c2: st.metric("Median",        f"{df['dist_km'].median():.3f} km")
+    with c3: st.metric("Maksimum",      f"{df['dist_km'].max():.3f} km")
+    with c4: st.metric("Di luar 300m",  f"{n_out:,} ({n_out/max(len(df),1)*100:.1f}%)")
+    with c5: st.metric("Sangat jauh >5km", f"{n_far:,}")
+
+    # ── Row 1: Histogram + Boxplot ───────────────────────────
     cl, cr = st.columns(2)
     with cl:
-        fig = px.histogram(df[df['dist_km']<=10], x='dist_km',
-                           title='Distribusi Jarak ≤10km', nbins=50,
-                           color_discrete_sequence=['#3498db'])
+        # Histogram colored by status_presensi (bukan risk_level)
+        fig = px.histogram(
+            df[df['dist_km']<=10], x='dist_km',
+            color='status_presensi',
+            title='Distribusi Jarak ≤10km per Status Presensi',
+            nbins=50, color_discrete_map=STATUS_COLORS,
+            category_orders={'status_presensi': STATUS_ORDER})
         fig.add_vline(x=0.3, line_dash='dash', line_color='red',
                       annotation_text='300m', annotation_position='top right')
-        fig.update_layout(showlegend=False)
+        fig.update_layout(height=380)
         st.plotly_chart(fig, use_container_width=True)
     with cr:
-        # Box plot jarak per SKPD — tanpa breakdown status
-        skpd_dist = df[df['dist_km']<=10].groupby('id_skpd')['dist_km'].median().reset_index()
-        skpd_dist = skpd_dist.sort_values('dist_km', ascending=False)
-        fig = px.bar(skpd_dist, x='id_skpd', y='dist_km',
-                     title='Median Jarak per SKPD',
-                     color='dist_km', color_continuous_scale='Blues_r')
-        fig.add_hline(y=0.3, line_dash='dash', line_color='red',
-                      annotation_text='300m')
+        # Boxplot jarak per SKPD colored by status_presensi
+        fig = px.box(
+            df[df['dist_km']<=10], x='id_skpd', y='dist_km',
+            color='status_presensi',
+            title='Distribusi Jarak per SKPD',
+            color_discrete_map=STATUS_COLORS,
+            category_orders={'status_presensi': STATUS_ORDER})
+        fig.add_hline(y=0.3, line_dash='dash', line_color='red', annotation_text='300m')
         fig.update_xaxes(type='category')
-        fig.update_layout(coloraxis_showscale=False)
+        fig.update_layout(height=380)
         st.plotly_chart(fig, use_container_width=True)
-    # Row kedua: distribusi outside/inside 300m
+
+    # ── Row 2: Pie zona + Median bar per SKPD ────────────────
     cl2, cr2 = st.columns(2)
     with cl2:
         zone = pd.DataFrame({
@@ -885,41 +1006,44 @@ def _vis_distance(df):
                      hole=0.4)
         st.plotly_chart(fig, use_container_width=True)
     with cr2:
-        # Histogram zoom untuk jarak 0-500m
-        fig = px.histogram(df[df['dist_km']<=0.5], x='dist_km',
-                           title='Distribusi Jarak ≤500m (zoom)', nbins=50,
-                           color_discrete_sequence=['#2ecc71'])
-        fig.add_vline(x=0.3, line_dash='dash', line_color='red',
-                      annotation_text='300m')
-        fig.update_layout(showlegend=False)
+        skpd_dist = (df[df['dist_km']<=10]
+                     .groupby('id_skpd')['dist_km']
+                     .median().reset_index()
+                     .sort_values('dist_km', ascending=False))
+        fig = px.bar(skpd_dist, x='id_skpd', y='dist_km',
+                     title='Median Jarak per SKPD',
+                     color='dist_km', color_continuous_scale='Blues_r')
+        fig.add_hline(y=0.3, line_dash='dash', line_color='red', annotation_text='300m')
+        fig.update_xaxes(type='category')
+        fig.update_layout(coloraxis_showscale=False)
         st.plotly_chart(fig, use_container_width=True)
 
 
 def _vis_employee(df):
     pivot = df.groupby(['karyawan_id','status_presensi']).size().unstack(fill_value=0)
     pivot['total'] = pivot.sum(axis=1)
-    pivot['bermasalah_n'] = sum(pivot.get(s, 0) for s in STATUS_BERMASALAH)
-    pivot['bermasalah_pct'] = (pivot['bermasalah_n'] / pivot['total'] * 100).round(1)
+    pivot['indiscipline_n'] = sum(pivot.get(s, 0) for s in STATUS_BERMASALAH)
+    pivot['indiscipline_pct'] = (pivot['indiscipline_n'] / pivot['total'] * 100).round(1)
     pivot['skpd'] = df.groupby('karyawan_id')['id_skpd'].first()
-    pivot = pivot.reset_index().sort_values('bermasalah_n', ascending=False)
+    pivot = pivot.reset_index().sort_values('indiscipline_n', ascending=False)
     cl, cr = st.columns(2)
     with cl:
-        top = pivot.nlargest(15, 'bermasalah_n')
+        top = pivot.nlargest(15, 'indiscipline_n')
         berm_cols = [s for s in STATUS_BERMASALAH if s in top.columns]
         if berm_cols:
-            fig = px.bar(top, x='karyawan_id', y=berm_cols, title='Top 15 Bermasalah',
+            fig = px.bar(top, x='karyawan_id', y=berm_cols, title='Top 15 Indiscipline',
                          color_discrete_map=STATUS_COLORS, barmode='stack')
             fig.update_xaxes(type='category')
             st.plotly_chart(fig, use_container_width=True)
     with cr:
-        fig = px.scatter(pivot, x='total', y='bermasalah_pct', size='bermasalah_n',
-                         color='bermasalah_pct', hover_data=['karyawan_id','skpd'],
-                         title='Total vs % Bermasalah', color_continuous_scale='RdYlGn_r')
+        fig = px.scatter(pivot, x='total', y='indiscipline_pct', size='indiscipline_n',
+                         color='indiscipline_pct', hover_data=['karyawan_id','skpd'],
+                         title='Total vs % Indiscipline', color_continuous_scale='RdYlGn_r')
         st.plotly_chart(fig, use_container_width=True)
-    risky = pivot[pivot['bermasalah_n'] > 0]
+    risky = pivot[pivot['indiscipline_n'] > 0]
     if len(risky):
-        st.markdown("### 🚨 Karyawan Bermasalah")
-        show_cols = ['karyawan_id','skpd','total','bermasalah_n','bermasalah_pct'] + \
+        st.markdown("### 🚨 Karyawan Indiscipline")
+        show_cols = ['karyawan_id','skpd','total','indiscipline_n','indiscipline_pct'] + \
                     [s for s in STATUS_ORDER if s in risky.columns]
         st.dataframe(risky[show_cols].head(30), use_container_width=True)
 
@@ -933,7 +1057,7 @@ def _vis_approver(df):
     with c1: st.metric("✅ TERIMA",            f"{df['is_terima'].sum():,}")
     with c2: st.metric("❌ TOLAK",             f"{df['is_tolak'].sum():,}")
     with c3: st.metric("⏳ PENDING",           f"{df['is_pending'].sum():,}")
-    with c4: st.metric("🚨 Terima Bermasalah", f"{df['terima_bermasalah'].sum():,}")
+
 
     # ── Chart status vs approver ──────────────────────────────
     cross = df.groupby(['status_presensi','approver_status']).size().reset_index(name='n')
@@ -945,31 +1069,14 @@ def _vis_approver(df):
         fig.update_layout(height=380)
         st.plotly_chart(fig, use_container_width=True)
 
-    base_cols = ['karyawan_id','id_skpd','jenis','tanggal_kirim','status_presensi',
-                 'dist_km','approver_status','catatan','anomaly_score','risk_level',
-                 'is_noise_masuk','is_noise_pulang','is_st_noise_masuk','is_st_noise_pulang']
+    base_cols = [c for c in ['karyawan_id','id_skpd','jenis','tanggal_kirim','status_presensi',
+                 'dist_km','approver_status','catatan','anomaly_score','risk_level']
+                 if c in df.columns]
 
-    tabs_approver = st.tabs(["🚨 Terima Bermasalah", "📍 Noise di-TERIMA", "⏳ Pending"])
+    tabs_approver = st.tabs(["📍 Noise di-TERIMA", "⏳ Pending"])
 
-    # ── Tab 1: Terima Bermasalah ──────────────────────────────
+    # ── Tab 1: Noise DBSCAN / ST-DBSCAN yang di-TERIMA ───────
     with tabs_approver[0]:
-        tb = df[df['terima_bermasalah'] == 1]
-        if len(tb):
-            st.markdown(f"""<div class='alert-box alert-red'>
-            🚨 <b>{len(tb):,} absensi bermasalah (TELAT_BERAT/SEDANG atau PULANG_CEPAT_BERAT/SEDANG) tetap di-TERIMA approver</b>
-            </div>""", unsafe_allow_html=True)
-            cols = [c for c in base_cols if c in tb.columns]
-            st.dataframe(tb[cols].sort_values('anomaly_score', ascending=False)
-                         if 'anomaly_score' in tb.columns else tb[cols],
-                         use_container_width=True, height=400)
-            st.download_button("⬇️ Download Terima Bermasalah",
-                               tb[cols].to_csv(index=False).encode(),
-                               "terima_bermasalah.csv", "text/csv")
-        else:
-            st.success("✅ Tidak ada absensi bermasalah yang di-TERIMA.")
-
-    # ── Tab 2: Noise DBSCAN / ST-DBSCAN yang di-TERIMA ───────
-    with tabs_approver[1]:
         noise_cols = [c for c in ['is_noise_masuk','is_noise_pulang',
                                    'is_st_noise_masuk','is_st_noise_pulang'] if c in df.columns]
         if not noise_cols:
@@ -998,9 +1105,9 @@ def _vis_approver(df):
                 ⚠️ <b>{len(noise_terima):,} absensi outlier lokasi/waktu tetap di-TERIMA approver</b>
                 — lokasi tidak konsisten dengan pola absensi normal karyawan tersebut.
                 </div>""", unsafe_allow_html=True)
-                cols = [c for c in base_cols + noise_cols if c in noise_terima.columns]
+                cols = list(dict.fromkeys([c for c in base_cols + noise_cols if c in noise_terima.columns]))
                 st.dataframe(noise_terima[cols].sort_values('dist_km', ascending=False)
-                             if 'dist_km' in noise_terima.columns else noise_terima[cols],
+                             if 'dist_km' in noise_terima.columns else noise_terima[cols].sort_values('anomaly_score', ascending=False) if 'anomaly_score' in noise_terima.columns else noise_terima[cols],
                              use_container_width=True, height=400)
                 st.download_button("⬇️ Download Noise Terima",
                                    noise_terima[cols].to_csv(index=False).encode(),
@@ -1009,7 +1116,7 @@ def _vis_approver(df):
                 st.success("✅ Tidak ada noise yang di-TERIMA.")
 
     # ── Tab 3: PENDING ────────────────────────────────────────
-    with tabs_approver[2]:
+    with tabs_approver[1]:
         pending = df[df['is_pending'] == 1]
         if len(pending):
             st.markdown(f"""<div class='alert-box alert-blue'>
@@ -1043,11 +1150,11 @@ def _vis_approver(df):
                 fig.update_xaxes(type='category')
                 st.plotly_chart(fig, use_container_width=True)
 
-            # Tabel detail pending, prioritaskan yang bermasalah dulu
-            st.markdown("**Detail — bermasalah diprioritaskan di atas:**")
+            # Tabel detail pending, prioritaskan yang indiscipline dulu
+            st.markdown("**Detail — indiscipline diprioritaskan di atas:**")
             cols = [c for c in base_cols if c in pending.columns]
-            pending_sorted = pending.sort_values(['is_bermasalah','dist_km'],
-                                                  ascending=[False,False])
+            sort_by = ['is_bermasalah'] + (['dist_km'] if 'dist_km' in pending.columns else [])
+            pending_sorted = pending.sort_values(sort_by, ascending=False)
             st.dataframe(pending_sorted[cols].head(200),
                          use_container_width=True, height=420)
             st.download_button("⬇️ Download Pending",
@@ -1069,7 +1176,7 @@ def _vis_data(df):
         dft = dft.sort_values(sort_col, ascending=(sort_col == 'tanggal_kirim'))
     cols = [c for c in ['karyawan_id','id_skpd','jenis','tanggal_kirim',
                         'status_presensi','dist_km','approver_status',
-                        'terima_bermasalah','catatan'] if c in dft.columns]
+                        'catatan'] if c in dft.columns]
     st.dataframe(dft[cols].head(500), use_container_width=True, height=480)
     st.caption(f"{min(500,len(dft))} dari {len(dft):,}")
     st.download_button("⬇️ CSV", dft[cols].to_csv(index=False).encode(), "filtered.csv", "text/csv")
@@ -1088,7 +1195,7 @@ def page_hunting():
         <div class="hunt-title">[ HUNTING MODE ]</div>
         <div class="hunt-sub">Investigasi mendalam — per status presensi</div>
     </div>""", unsafe_allow_html=True)
-    n = len(df); nb = df['is_bermasalah'].sum(); tb = df['terima_bermasalah'].sum()
+    n = len(df); nb = df['is_bermasalah'].sum()
     vc = df['status_presensi'].value_counts()
     parts = []
     for s in STATUS_ORDER:
@@ -1100,7 +1207,7 @@ def page_hunting():
         font-size:.8rem;flex-wrap:wrap">
         <span>📊 <b>{n:,}</b></span>{' '.join(parts)}
         <span>👤 <b>{df['karyawan_id'].nunique():,}</b></span>
-        {"<span>🚨 <b style='color:#c0392b'>" + str(tb) + "</b> Terima Brmslh</span>" if tb else ""}
+        ""
     </div>""", unsafe_allow_html=True)
     t1, t2, t3 = st.tabs(["🕵️ By Pegawai", "🏢 By SKPD", "📅 By Tanggal"])
     with t1: _hunt_pegawai(df, oc)
@@ -1121,7 +1228,7 @@ def _hunt_pegawai(df, oc):
         sel = st.selectbox("🔎 Pilih Pegawai", ids,
             format_func=lambda x: (
                 f"ID {x} | SKPD {df[df['karyawan_id']==x]['id_skpd'].iloc[0] if len(df[df['karyawan_id']==x]) else '-'}"
-                f" | Bermasalah: {df[df['karyawan_id']==x]['is_bermasalah'].sum()}"),
+                f" | Indiscipline: {df[df['karyawan_id']==x]['is_bermasalah'].sum()}"),
             key='hp_id')
     with cb:
         st.markdown("<br>", unsafe_allow_html=True)
@@ -1135,13 +1242,11 @@ def _hunt_pegawai(df, oc):
     tot = len(de); nb = de['is_bermasalah'].sum()
     skpd_e = de['id_skpd'].mode()[0]
     avg_km = de['dist_km'].mean() if 'dist_km' in de.columns else 0
-    n_tb = de['terima_bermasalah'].sum()
     st.markdown(f"""<div class="metric-grid">
-        <div class="metric-card mc-blue"><div class="metric-val">{tot}</div><div class="metric-lbl">Total</div></div>
-        <div class="metric-card mc-red"><div class="metric-val">{nb}</div><div class="metric-lbl">Bermasalah</div></div>
-        <div class="metric-card mc-green"><div class="metric-val">{tot-nb}</div><div class="metric-lbl">OK</div></div>
-        <div class="metric-card"><div class="metric-val">{avg_km:.3f} km</div><div class="metric-lbl">Avg Jarak</div></div>
-        <div class="metric-card {'mc-red' if n_tb else ''}"><div class="metric-val">{n_tb}</div><div class="metric-lbl">Terima Brmslh</div></div>
+    <div class="metric-card mc-blue"><div class="metric-val">{tot}</div><div class="metric-lbl">Total</div></div>
+    <div class="metric-card mc-red"><div class="metric-val">{nb}</div><div class="metric-lbl">Indiscipline</div></div>
+    <div class="metric-card mc-green"><div class="metric-val">{tot-nb}</div><div class="metric-lbl">OK</div></div>
+    <div class="metric-card"><div class="metric-val">{avg_km:.3f} km</div><div class="metric-lbl">Avg Jarak</div></div>
     </div>""", unsafe_allow_html=True)
     vc2 = de['status_presensi'].value_counts()
     n_sc = min(len(vc2), 5)
@@ -1172,7 +1277,7 @@ def _hunt_pegawai(df, oc):
                     delay=800, dash_array=[10, 20]).add_to(mp)
         for i, (_, row) in enumerate(de.iterrows()):
             fc = status_folium_color(row.get('status_presensi',''))
-            border = 'gold' if row.get('terima_bermasalah',0) == 1 else fc
+            border = 'gold' if row.get(0) == 1 else fc
             berm = is_bermasalah(row.get('status_presensi',''))
             popup = (f"<div style='font-size:12px'><b>#{i+1} — {str(row.get('tanggal_kirim',''))[:16]}</b>"
                      f"<br>{'🟢 Masuk' if row.get('jenis')=='M' else '🔴 Pulang'}"
@@ -1193,15 +1298,15 @@ def _hunt_pegawai(df, oc):
     with t3:
         df_s = df[df['id_skpd'] == skpd_e]
         ag = df_s.groupby('karyawan_id').agg(
-            bermasalah_n=('is_bermasalah','sum'),
+            n_bermasalah=('is_bermasalah','sum'),
             total=('karyawan_id','count')).reset_index()
-        ag['pct'] = (ag['bermasalah_n'] / ag['total'] * 100).round(1)
+        ag['pct'] = (ag['n_bermasalah'] / ag['total'] * 100).round(1)
         emp_r = ag[ag['karyawan_id'] == sel]
         if not emp_r.empty:
             e = emp_r.iloc[0]
-            rank = (ag['bermasalah_n'] > e['bermasalah_n']).sum() + 1
+            rank = (ag['n_bermasalah'] > e['n_bermasalah']).sum() + 1
             st.markdown(f"#### SKPD {skpd_e} — Peringkat **{rank}** dari {len(ag)}")
-        fig = px.scatter(ag, x='total', y='pct', size='bermasalah_n', color='pct',
+        fig = px.scatter(ag, x='total', y='pct', size='n_bermasalah', color='pct',
                          color_continuous_scale='RdYlGn_r', hover_data=['karyawan_id'],
                          title=f'Sebaran SKPD {skpd_e}')
         if not emp_r.empty:
@@ -1211,20 +1316,28 @@ def _hunt_pegawai(df, oc):
         fig.update_layout(height=420)
         st.plotly_chart(fig, use_container_width=True)
     with t4:
-        if 'approver_status' in de.columns:
-            cross = de.groupby(['status_presensi','approver_status']).size().reset_index(name='n')
-            cross = cross[cross['approver_status'] != '']
-            if not cross.empty:
-                fig = px.bar(cross, x='status_presensi', y='n', color='approver_status',
-                             title='Status vs Approver', barmode='group')
-                fig.update_layout(height=340)
+        if 'approver_status' not in de.columns:
+            st.info("Kolom approver_status tidak ada.")
+        else:
+            # Metric ringkasan
+            a1, a2, a3 = st.columns(3)
+            with a1: st.metric("✅ TERIMA",  f"{de['is_terima'].sum():,}")
+            with a2: st.metric("❌ TOLAK",   f"{de['is_tolak'].sum():,}")
+            with a3: st.metric("⏳ PENDING", f"{de['is_pending'].sum():,}")
+
+            # Pie chart TERIMA / TOLAK / PENDING
+            agg_pie = pd.DataFrame({
+                'Status': ['TERIMA', 'TOLAK', 'PENDING'],
+                'Jumlah': [de['is_terima'].sum(), de['is_tolak'].sum(), de['is_pending'].sum()]
+            })
+            agg_pie = agg_pie[agg_pie['Jumlah'] > 0]
+            if not agg_pie.empty:
+                fig = px.pie(agg_pie, values='Jumlah', names='Status',
+                             title=f'Distribusi Keputusan Approver — ID {sel}',
+                             color='Status',
+                             color_discrete_map={'TERIMA':'#27ae60','TOLAK':'#e74c3c','PENDING':'#95a5a6'},
+                             hole=0.4)
                 st.plotly_chart(fig, use_container_width=True)
-            tb_r = de[de['terima_bermasalah'] == 1]
-            if len(tb_r):
-                st.error(f"🚨 {len(tb_r)} Terima Bermasalah!")
-                cols = [c for c in ['tanggal_kirim','jenis','status_presensi',
-                                    'dist_km','approver_status'] if c in tb_r.columns]
-                st.dataframe(tb_r[cols], use_container_width=True)
     with t5:
         cols = [c for c in ['tanggal_kirim','jenis','status_presensi',
                             'dist_km','approver_status','catatan'] if c in de.columns]
@@ -1244,21 +1357,19 @@ def _hunt_skpd(df, oc):
         key='hs_id')
     ds = df[df['id_skpd'] == sel_s].copy()
     if ds.empty: st.warning("Tidak ada data."); return
-    nk = ds['karyawan_id'].nunique(); nb = ds['is_bermasalah'].sum(); n_tb = ds['terima_bermasalah'].sum()
-    st.markdown(f"""<div class="metric-grid">
+    nk = ds['karyawan_id'].nunique(); nb = ds['is_bermasalah'].sum();     st.markdown(f"""<div class="metric-grid">
         <div class="metric-card mc-blue"><div class="metric-val">{len(ds):,}</div><div class="metric-lbl">Total</div></div>
         <div class="metric-card mc-blue"><div class="metric-val">{nk}</div><div class="metric-lbl">Karyawan</div></div>
-        <div class="metric-card mc-red"><div class="metric-val">{nb:,}</div><div class="metric-lbl">Bermasalah</div></div>
+        <div class="metric-card mc-red"><div class="metric-val">{nb:,}</div><div class="metric-lbl">Indiscipline</div></div>
         <div class="metric-card"><div class="metric-val">{nb/max(len(ds),1)*100:.1f}%</div><div class="metric-lbl">%</div></div>
-        <div class="metric-card {'mc-red' if n_tb else ''}"><div class="metric-val">{n_tb}</div><div class="metric-lbl">Terima Brmslh</div></div>
     </div>""", unsafe_allow_html=True)
     t1, t2, t3, t4 = st.tabs(["🏆 Leaderboard","🔥 Heatmap","📅 Trend","📋 Approver"])
     with t1:
         pv = ds.groupby(['karyawan_id','status_presensi']).size().unstack(fill_value=0)
         pv['total'] = pv.sum(axis=1)
-        pv['bermasalah_n'] = sum(pv.get(s, 0) for s in STATUS_BERMASALAH)
-        pv['pct'] = (pv['bermasalah_n'] / pv['total'] * 100).round(1)
-        pv = pv.reset_index().sort_values('bermasalah_n', ascending=False)
+        pv['indiscipline_n'] = sum(pv.get(s, 0) for s in STATUS_BERMASALAH)
+        pv['pct'] = (pv['indiscipline_n'] / pv['total'] * 100).round(1)
+        pv = pv.reset_index().sort_values('indiscipline_n', ascending=False)
         berm_cols = [s for s in STATUS_BERMASALAH if s in pv.columns]
         if berm_cols:
             fig = px.bar(pv.head(15), x='karyawan_id', y=berm_cols,
@@ -1288,15 +1399,26 @@ def _hunt_skpd(df, oc):
                           category_orders={'status_presensi':STATUS_ORDER})
             fig.update_layout(height=380); st.plotly_chart(fig, use_container_width=True)
     with t4:
-        if 'approver_status' in ds.columns:
-            cross = ds.groupby(['status_presensi','approver_status']).size().reset_index(name='n')
-            cross = cross[cross['approver_status'] != '']
-            if not cross.empty:
-                fig = px.bar(cross, x='status_presensi', y='n', color='approver_status',
-                             title='Status vs Approver', barmode='group')
-                fig.update_layout(height=380); st.plotly_chart(fig, use_container_width=True)
-            if n_tb > 0:
-                st.error(f"🚨 {n_tb} Terima Bermasalah!")
+        if 'approver_status' not in ds.columns:
+            st.info("Kolom approver_status tidak ada.")
+        else:
+            a1, a2, a3 = st.columns(3)
+            with a1: st.metric("✅ TERIMA",  f"{ds['is_terima'].sum():,}")
+            with a2: st.metric("❌ TOLAK",   f"{ds['is_tolak'].sum():,}")
+            with a3: st.metric("⏳ PENDING", f"{ds['is_pending'].sum():,}")
+
+            agg_pie = pd.DataFrame({
+                'Status': ['TERIMA', 'TOLAK', 'PENDING'],
+                'Jumlah': [ds['is_terima'].sum(), ds['is_tolak'].sum(), ds['is_pending'].sum()]
+            })
+            agg_pie = agg_pie[agg_pie['Jumlah'] > 0]
+            if not agg_pie.empty:
+                fig = px.pie(agg_pie, values='Jumlah', names='Status',
+                             title=f'Distribusi Keputusan Approver — SKPD {sel_s}',
+                             color='Status',
+                             color_discrete_map={'TERIMA':'#27ae60','TOLAK':'#e74c3c','PENDING':'#95a5a6'},
+                             hole=0.4)
+                st.plotly_chart(fig, use_container_width=True)
 
 
 def _hunt_tanggal(df, oc):
@@ -1304,7 +1426,9 @@ def _hunt_tanggal(df, oc):
         <div><div style="font-size:1.1rem;font-weight:700;color:#2c3e50">Hunt by Tanggal</div></div>
     </div>""", unsafe_allow_html=True)
     if 'tanggal' not in df.columns: st.warning("Kolom tanggal tidak ada."); return
-    mn, mx = df['tanggal'].min(), df['tanggal'].max()
+    # Konversi ke date object agar timedelta bisa dipakai
+    mn = pd.to_datetime(df['tanggal'].min()).date()
+    mx = pd.to_datetime(df['tanggal'].max()).date()
     c1, c2 = st.columns(2)
     with c1:
         dr = st.date_input("📅 Rentang", value=(mx - timedelta(days=6), mx),
@@ -1321,7 +1445,7 @@ def _hunt_tanggal(df, oc):
     st.markdown(f"""<div class="metric-grid">
         <div class="metric-card mc-blue"><div class="metric-val">{len(dd):,}</div><div class="metric-lbl">Absensi</div></div>
         <div class="metric-card mc-blue"><div class="metric-val">{dd['karyawan_id'].nunique()}</div><div class="metric-lbl">Karyawan</div></div>
-        <div class="metric-card mc-red"><div class="metric-val">{nb:,}</div><div class="metric-lbl">Bermasalah</div></div>
+        <div class="metric-card mc-red"><div class="metric-val">{nb:,}</div><div class="metric-lbl">Indiscipline</div></div>
     </div>""", unsafe_allow_html=True)
     t1, t2, t3, t4 = st.tabs(["🗺️ Peta","⏰ Jam","🚨 Karyawan","🔍 Deteksi Titipan"])
     with t1:
@@ -1349,7 +1473,7 @@ def _hunt_tanggal(df, oc):
         emp = dd.groupby(['karyawan_id','id_skpd']).agg(
             n_abs=('karyawan_id','count'), n_berm=('is_bermasalah','sum')).reset_index()
         emp = emp.sort_values('n_berm', ascending=False)
-        min_b = st.slider("Min bermasalah", 0, max(1, int(emp['n_berm'].max())), 0, key='hd_mb')
+        min_b = st.slider("Min indiscipline", 0, max(1, int(emp['n_berm'].max())), 0, key='hd_mb')
         st.dataframe(emp[emp['n_berm'] >= min_b], use_container_width=True, height=380)
     with t4:
         st.markdown("#### 🔍 Deteksi Titipan Absensi")
@@ -1385,527 +1509,357 @@ def _hunt_tanggal(df, oc):
                 st.error(f"🚨 {len(kol)} pasangan mencurigakan!")
                 st.dataframe(pd.DataFrame(kol), use_container_width=True)
 
-# ============================================================
-# PREDIKSI
-# ============================================================
-
-def page_prediksi():
-    st.markdown("## 🔮 Prediksi Status Presensi")
-    if 'df' not in st.session_state or st.session_state.df is None:
-        st.warning("⚠️ Upload data dulu.")
-        return
-    oc = st.session_state.get('office_centroid', pd.DataFrame())
-    col_m, col_p = st.columns(2)
-    with col_m:
-        st.markdown("""### ⏰ MASUK
-| Jam | Kode | Status |
-|-----|------|--------|
-| ≤ 07:30 | TWM | 🟢 TEPAT_WAKTU_MASUK |
-| 07:31–08:00 | T2 | 🟡 TELAT_RINGAN |
-| 08:01–09:00 | T3 | 🟠 TELAT_SEDANG |
-| > 09:00 | T4 | 🔴 TELAT_BERAT |
-""")
-    with col_p:
-        st.markdown("""### ⏰ PULANG
-| Jam | Kode | Status |
-|-----|------|--------|
-| ≥ 16:00 | TWP | 🟢 TEPAT_WAKTU_PULANG |
-| 15:30–15:59 | PC1 | 🟡 PULANG_CEPAT |
-| 15:00–15:29 | PC2 | 🟡 PULANG_CEPAT_RINGAN |
-| 14:00–14:59 | PC3 | 🟠 PULANG_CEPAT_SEDANG |
-| < 14:00 | PC4 | 🔴 PULANG_CEPAT_BERAT |
-""")
-    with st.form("pred"):
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            m_kar  = st.number_input("Karyawan ID", min_value=1, value=1001)
-            m_skpd = st.selectbox("SKPD",
-                sorted(oc['id_skpd'].tolist()) if not oc.empty else [0])
-        with c2:
-            m_lat  = st.number_input("Latitude",
-                value=float(oc['office_lat'].median()) if not oc.empty else -6.2, format="%.6f")
-            m_long = st.number_input("Longitude",
-                value=float(oc['office_long'].median()) if not oc.empty else 106.8, format="%.6f")
-        with c3:
-            m_jenis = st.selectbox("Jenis", ['M','P'],
-                format_func=lambda x: 'Masuk' if x=='M' else 'Pulang')
-            m_waktu = st.time_input("Jam")
-        sub = st.form_submit_button("🔮 Prediksi", type="primary", use_container_width=True)
-    if sub:
-        jam_des = m_waktu.hour + m_waktu.minute / 60.0
-        status  = determine_status_from_jam(jam_des, m_jenis)
-        berm    = is_bermasalah(status)
-        dist_km = 0.0
-        if not oc.empty:
-            off = oc[oc['id_skpd'] == m_skpd]
-            if not off.empty:
-                o = off.iloc[0]
-                dist_km = haversine(m_lat, m_long, o['office_lat'], o['office_long']) / 1000
-        st.markdown("---")
-        c1, c2, c3 = st.columns(3)
-        with c1: st.metric("Status", f"{status_emoji(status)} {status}")
-        with c2: st.metric("Jarak",  f"{dist_km:.3f} km")
-        with c3: st.metric("Jam",    f"{m_waktu.hour:02d}:{m_waktu.minute:02d}")
-        if berm: st.error(f"{status_emoji(status)} **{status}** — Perlu perhatian!")
-        else:    st.success(f"{status_emoji(status)} **{status}**")
-        if dist_km > 0.3:
-            st.warning(f"📍 Di luar radius 300m ({dist_km:.3f} km)")
-
-    st.markdown("---")
-    pf = st.file_uploader("📂 Batch Prediksi", type=['csv','xlsx'], key='pu')
-    if pf and st.button("🚀 Jalankan Batch", type="primary"):
-        with st.spinner("⏳ Memproses..."):
-            dfp, _, _ = load_processed_file(pf.getvalue(), pf.name)
-            if not oc.empty and 'id_skpd' in dfp.columns:
-                dfp = dfp.merge(oc, on='id_skpd', how='left')
-                dfp['dist_km'] = dfp.apply(
-                    lambda r: haversine(r['lat'], r['long'],
-                                        r.get('office_lat', r['lat']),
-                                        r.get('office_long', r['long'])) / 1000
-                    if pd.notna(r.get('office_lat')) else 0.0, axis=1)
-        st.success(f"✅ {len(dfp):,} baris selesai diproses")
-        vc = dfp['status_presensi'].value_counts()
-        nc = min(len(vc), 5)
-        cols_m = st.columns(nc)
-        for i, (s, c) in enumerate(vc.items()):
-            with cols_m[i % nc]: st.metric(f"{status_emoji(s)} {s}", f"{c:,}")
-        cols = [c for c in ['karyawan_id','id_skpd','jenis','tanggal_kirim',
-                            'status_presensi','dist_km'] if c in dfp.columns]
-        st.dataframe(dfp[cols], use_container_width=True)
-        st.download_button("⬇️ Download Hasil", dfp[cols].to_csv(index=False).encode(),
-                           "prediksi.csv", "text/csv")
-
 
 # ============================================================
-# PREPROCESSING PAGE
+# PREPROCESSING
 # ============================================================
 
 def _run_preprocessing(df_raw: pd.DataFrame, config: dict):
-    """
-    Pipeline preprocessing lengkap:
-    1. Status presensi (T2/T3/T4/TWM/TWP/PC1-PC4) + durasi menit
-    2. Time features (jam, menit, jam_desimal, weekday)
-    3. Coordinate transform (radian)
-    4. DBSCAN spatial clustering
-    5. Estimasi centroid kantor
-    6. Haversine distance
-    7. Validation flags
-    8. ST-DBSCAN spatio-temporal
-    9. Anomaly score + risk level
-    """
-    import time
     df = df_raw.copy()
     logs = []
-
     def log(msg): logs.append(msg)
 
-    # ── STEP 1: Status Presensi & Durasi ─────────────────────
+    # STEP 1: Status Presensi & Durasi
     df['tanggal_kirim'] = pd.to_datetime(df['tanggal_kirim'])
-
-    has_post_dt  = 'masuk_post_dt'  in df.columns
-    has_pre_dt   = 'pulang_pre_dt'  in df.columns
-    has_post_t   = 'masuk_post_time' in df.columns
-    has_pre_t    = 'pulang_pre_time' in df.columns
-
-    # Build datetime threshold dari time columns jika belum ada
     def build_dt(row, tcol):
         t = row[tcol]
         if pd.isna(t): return pd.NaT
-        base = row['tanggal_kirim'].normalize()
-        return base.replace(hour=t.hour, minute=t.minute, second=t.second)
-
-    if not has_post_dt and has_post_t:
+        return row['tanggal_kirim'].normalize().replace(hour=t.hour, minute=t.minute, second=t.second)
+    if 'masuk_post_dt' not in df.columns and 'masuk_post_time' in df.columns:
         df['masuk_post_dt'] = df.apply(lambda r: build_dt(r,'masuk_post_time'), axis=1)
-    if not has_pre_dt and has_pre_t:
+    if 'pulang_pre_dt' not in df.columns and 'pulang_pre_time' in df.columns:
         df['pulang_pre_dt'] = df.apply(lambda r: build_dt(r,'pulang_pre_time'), axis=1)
-
     mask_m = df['jenis'] == 'M'
     mask_p = df['jenis'] == 'P'
-
-    df['menit_telat']  = np.nan
-    df['menit_cepat']  = np.nan
-
+    df['menit_telat'] = np.nan
+    df['menit_cepat'] = np.nan
     if 'masuk_post_dt' in df.columns:
-        df.loc[mask_m, 'menit_telat'] = (
-            (df.loc[mask_m,'tanggal_kirim'] - df.loc[mask_m,'masuk_post_dt'])
-            .dt.total_seconds() / 60).round(2)
+        df.loc[mask_m,'menit_telat'] = ((df.loc[mask_m,'tanggal_kirim'] - df.loc[mask_m,'masuk_post_dt']).dt.total_seconds()/60).round(2)
     if 'pulang_pre_dt' in df.columns:
-        df.loc[mask_p, 'menit_cepat'] = (
-            (df.loc[mask_p,'pulang_pre_dt'] - df.loc[mask_p,'tanggal_kirim'])
-            .dt.total_seconds() / 60).round(2)
-
+        df.loc[mask_p,'menit_cepat'] = ((df.loc[mask_p,'pulang_pre_dt'] - df.loc[mask_p,'tanggal_kirim']).dt.total_seconds()/60).round(2)
     df['durasi_menit'] = df['menit_telat'].fillna(df['menit_cepat'])
-
     def classify_masuk(m):
         if pd.isna(m): return 'UNKNOWN'
-        if m <= 0:  return 'TWM'
-        if m <= 14: return 'T2'
-        if m <= 44: return 'T3'
+        if m<=0: return 'TWM'
+        if m<=14: return 'T2'
+        if m<=44: return 'T3'
         return 'T4'
-
     def classify_pulang(m):
         if pd.isna(m): return 'UNKNOWN'
-        if m <= 0:  return 'TWP'
-        if m <= 30: return 'PC1'
-        if m <= 60: return 'PC2'
-        if m <= 90: return 'PC3'
+        if m<=0: return 'TWP'
+        if m<=30: return 'PC1'
+        if m<=60: return 'PC2'
+        if m<=90: return 'PC3'
         return 'PC4'
-
+    df['status_presensi_calc'] = pd.Series(dtype=object)
+    df.loc[mask_m,'status_presensi_calc'] = df.loc[mask_m,'menit_telat'].apply(classify_masuk).values
+    df.loc[mask_p,'status_presensi_calc'] = df.loc[mask_p,'menit_cepat'].apply(classify_pulang).values
     if 'status_presensi' not in df.columns or config.get('recalc_status', False):
-        df['status_presensi_calc'] = pd.Series(dtype=object)
-        df.loc[mask_m, 'status_presensi_calc'] = df.loc[mask_m,'menit_telat'].apply(classify_masuk).values
-        df.loc[mask_p, 'status_presensi_calc'] = df.loc[mask_p,'menit_cepat'].apply(classify_pulang).values
-        if 'status_presensi' not in df.columns:
-            df['status_presensi'] = df['status_presensi_calc']
-        n_diff = (df['status_presensi'] != df['status_presensi_calc']).sum()
-        log(f"✅ Status presensi dihitung ulang. Mismatch vs asli: {n_diff:,} baris")
-    else:
-        df['status_presensi_calc'] = pd.Series(dtype=object)
-        df.loc[mask_m, 'status_presensi_calc'] = df.loc[mask_m,'menit_telat'].apply(classify_masuk).values
-        df.loc[mask_p, 'status_presensi_calc'] = df.loc[mask_p,'menit_cepat'].apply(classify_pulang).values
-        log("✅ STEP 1: Durasi telat/cepat dihitung, status_presensi_calc ditambahkan")
+        df['status_presensi'] = df['status_presensi_calc']
+    n_diff = (df['status_presensi'] != df['status_presensi_calc']).sum() if 'status_presensi' in df_raw.columns else 0
+    log(f"✅ STEP 1: Status & durasi dihitung. Mismatch vs asli: {n_diff:,}")
 
-    # ── STEP 2: Time Features ─────────────────────────────────
-    if 'jam' not in df.columns:
-        df['jam']         = df['tanggal_kirim'].dt.hour
-        df['menit_waktu'] = df['tanggal_kirim'].dt.minute
-        df['jam_desimal'] = df['jam'] + df['menit_waktu'] / 60.0
-        df['weekday']     = df['tanggal_kirim'].dt.weekday
-        df['tanggal']     = df['tanggal_kirim'].dt.date
-        df['timestamp_num'] = df['tanggal_kirim'].astype(np.int64) // 10**9
-    log("✅ STEP 2: Time features (jam, jam_desimal, weekday, timestamp_num)")
+    # STEP 2: Time Features
+    df['jam']          = df['tanggal_kirim'].dt.hour
+    df['menit']        = df['tanggal_kirim'].dt.minute
+    df['jam_desimal']  = df['jam'] + df['menit'] / 60.0
+    df['weekday']      = df['tanggal_kirim'].dt.weekday
+    df['tanggal']      = df['tanggal_kirim'].dt.date
+    df['timestamp_num']= df['tanggal_kirim'].astype(np.int64) // 10**9
+    log("✅ STEP 2: Time features (jam, menit, jam_desimal, weekday, timestamp_num)")
 
-    # ── STEP 3: Coordinate Transform ─────────────────────────
+    # STEP 3: Coordinate Transform
     df = df.dropna(subset=['lat','long'])
     df['lat_rad']  = np.radians(df['lat'])
     df['long_rad'] = np.radians(df['long'])
-    log("✅ STEP 3: Koordinat ke radian (lat_rad, long_rad)")
+    log("✅ STEP 3: Koordinat ke radian")
 
-    if not config.get('run_dbscan', True):
-        log("⏭️ STEP 4-5: DBSCAN dilewati (nonaktif)")
-        df['cluster_masuk'] = -1; df['cluster_pulang'] = -1
-        df['is_noise_masuk'] = 0; df['is_noise_pulang'] = 0
-        df['cluster_size_masuk'] = 0; df['cluster_size_pulang'] = 0
+    # STEP 4 & 5: DBSCAN + Centroid
+    if not config.get('run_dbscan', True) or not SKLEARN_OK:
+        df['cluster_masuk']=-1; df['cluster_pulang']=-1
+        df['is_noise_masuk']=0; df['is_noise_pulang']=0
+        df['cluster_size_masuk']=0; df['cluster_size_pulang']=0
+        log("⏭️ STEP 4-5: DBSCAN dilewati")
     else:
-        if not SKLEARN_OK:
-            log("⚠️ sklearn tidak tersedia, DBSCAN dilewati")
-            df['cluster_masuk'] = -1; df['cluster_pulang'] = -1
-            df['is_noise_masuk'] = 0; df['is_noise_pulang'] = 0
-            df['cluster_size_masuk'] = 0; df['cluster_size_pulang'] = 0
-        else:
-            # ── STEP 4: DBSCAN ───────────────────────────────
-            eps_km  = config.get('eps_km', 0.1)
-            min_smp = config.get('min_samples', 3)
-            eps_rad = eps_km / 6371.0
+        eps_rad = config.get('eps_km',0.1) / 6371.0
+        min_smp = config.get('min_samples',3)
+        def dbscan_spatial(subset):
+            result = pd.Series(-1, index=df.index, dtype=int)
+            for skpd, grp in subset.groupby('id_skpd'):
+                if len(grp) < min_smp: continue
+                coords = grp[['lat_rad','long_rad']].values
+                labels = DBSCAN(eps=eps_rad, min_samples=min_smp, algorithm='ball_tree', metric='haversine').fit(coords).labels_
+                max_l = result.max()+1
+                result.loc[grp.index] = np.where(labels>=0, labels+max_l, -1)
+            return result
+        df['cluster_masuk']  = dbscan_spatial(df[df['jenis']=='M'])
+        df['cluster_pulang'] = dbscan_spatial(df[df['jenis']=='P'])
+        df['is_noise_masuk']  = (df['cluster_masuk']  == -1).astype(int)
+        df['is_noise_pulang'] = (df['cluster_pulang'] == -1).astype(int)
+        for jenis, col in [('M','cluster_masuk'),('P','cluster_pulang')]:
+            sz_col = col.replace('cluster','cluster_size')
+            mask = df['jenis']==jenis
+            sz = df[mask].groupby(col)['karyawan_id'].transform('count')
+            df.loc[mask, sz_col] = sz
+        df[['cluster_size_masuk','cluster_size_pulang']] = df[['cluster_size_masuk','cluster_size_pulang']].fillna(0).astype(int)
+        log(f"✅ STEP 4: DBSCAN — noise masuk:{df['is_noise_masuk'].sum():,} pulang:{df['is_noise_pulang'].sum():,}")
+        # Centroid kantor
+        office_locs = {}
+        for skpd, grp in df[df['jenis']=='M'].groupby('id_skpd'):
+            nn = grp[grp['cluster_masuk']!=-1]
+            src = nn if len(nn)>0 else grp
+            if len(nn)>0:
+                best = nn['cluster_masuk'].value_counts().idxmax()
+                src = nn[nn['cluster_masuk']==best]
+            office_locs[skpd] = {'office_lat':src['lat'].mean(),'office_long':src['long'].mean()}
+        oc_df = pd.DataFrame.from_dict(office_locs, orient='index').reset_index()
+        oc_df.columns = ['id_skpd','office_lat','office_long']
+        oc_df['id_skpd'] = oc_df['id_skpd'].astype(df['id_skpd'].dtype)
+        if 'office_lat' in df.columns: df = df.drop(columns=['office_lat','office_long'])
+        df = df.merge(oc_df, on='id_skpd', how='left')
+        log(f"✅ STEP 5: Centroid kantor {len(office_locs)} SKPD")
 
-            def dbscan_spatial(subset, jenis_col):
-                result = pd.Series(-1, index=df.index, dtype=int)
-                for skpd_id, grp in subset.groupby('id_skpd'):
-                    if len(grp) < min_smp: continue
-                    coords = grp[['lat_rad','long_rad']].values
-                    labels = DBSCAN(eps=eps_rad, min_samples=min_smp,
-                                    algorithm='ball_tree', metric='haversine').fit(coords).labels_
-                    max_l = result.max() + 1
-                    result.loc[grp.index] = np.where(labels>=0, labels+max_l, -1)
-                return result
-
-            df['cluster_masuk']  = dbscan_spatial(df[df['jenis']=='M'], 'M')
-            df['cluster_pulang'] = dbscan_spatial(df[df['jenis']=='P'], 'P')
-            df['is_noise_masuk']  = (df['cluster_masuk']  == -1).astype(int)
-            df['is_noise_pulang'] = (df['cluster_pulang'] == -1).astype(int)
-            for jenis, col in [('M','cluster_masuk'),('P','cluster_pulang')]:
-                sz_col = col.replace('cluster','cluster_size')
-                mask = df['jenis']==jenis
-                sz = df[mask].groupby(col)['karyawan_id'].transform('count')
-                df.loc[mask, sz_col] = sz
-            df[['cluster_size_masuk','cluster_size_pulang']] = (
-                df[['cluster_size_masuk','cluster_size_pulang']].fillna(0).astype(int))
-            n_cluster_m = (df['cluster_masuk'] >= 0).sum()
-            n_cluster_p = (df['cluster_pulang'] >= 0).sum()
-            log(f"✅ STEP 4: DBSCAN — {n_cluster_m:,} masuk / {n_cluster_p:,} pulang di-cluster")
-
-            # ── STEP 5: Centroid Kantor ───────────────────────
-            office_locs = {}
-            for skpd_id, grp in df[df['jenis']=='M'].groupby('id_skpd'):
-                non_noise = grp[grp['cluster_masuk'] != -1]
-                if len(non_noise) == 0:
-                    office_locs[skpd_id] = {'office_lat':grp['lat'].median(),'office_long':grp['long'].median()}
-                else:
-                    best = non_noise['cluster_masuk'].value_counts().idxmax()
-                    pts  = non_noise[non_noise['cluster_masuk']==best]
-                    office_locs[skpd_id] = {'office_lat':pts['lat'].mean(),'office_long':pts['long'].mean()}
-            oc_df = pd.DataFrame.from_dict(office_locs, orient='index').reset_index()
-            oc_df.columns = ['id_skpd','office_lat','office_long']
-            oc_df['id_skpd'] = oc_df['id_skpd'].astype(df['id_skpd'].dtype)
-            if 'office_lat' in df.columns: df = df.drop(columns=['office_lat','office_long'])
-            df = df.merge(oc_df, on='id_skpd', how='left')
-            log(f"✅ STEP 5: Centroid kantor untuk {len(office_locs)} SKPD")
-
-    # ── STEP 6: Haversine Distance ────────────────────────────
+    # STEP 6: Haversine Distance
     if 'office_lat' not in df.columns:
-        # Fallback: hitung centroid sederhana jika DBSCAN dilewati
         oc_simple = df[df['jenis']=='M'].groupby('id_skpd')[['lat','long']].median().reset_index()
         oc_simple.columns = ['id_skpd','office_lat','office_long']
         df = df.merge(oc_simple, on='id_skpd', how='left')
-        log("✅ STEP 5b: Centroid kantor dari median (tanpa DBSCAN)")
+    def hav(lat1,lon1,lat2,lon2):
+        R=6371.0
+        rlat1,rlat2 = np.radians(lat1), np.radians(lat2)
+        rlon1,rlon2 = np.radians(lon1), np.radians(lon2)
+        a = np.sin((rlat2-rlat1)/2)**2 + np.cos(rlat1)*np.cos(rlat2)*np.sin((rlon2-rlon1)/2)**2
+        return R*2*np.arcsin(np.sqrt(a))
+    df['dist_km']      = hav(df['lat'].values,df['long'].values,df['office_lat'].values,df['office_long'].values)
+    df['outside_300m'] = (df['dist_km']>0.3).astype(int)
+    df['very_far']     = (df['dist_km']>5.0).astype(int)
+    df['extreme_far']  = (df['dist_km']>50.0).astype(int)
+    log(f"✅ STEP 6: Haversine — {df['outside_300m'].sum():,} di luar 300m")
 
-    def haversine_vec(lat1,lon1,lat2,lon2):
-        R = 6371.0
-        r1,r2,r3,r4 = map(np.radians,[lat1,lon1,lat2,lon2])
-        a = np.sin((r2-r1)/2)**2 + np.cos(r1)*np.cos(r2)*np.sin((r4-r3)/2)**2
-        return R * 2 * np.arcsin(np.sqrt(a))
-
-    df['dist_km']      = haversine_vec(df['lat'].values,df['long'].values,df['office_lat'].values,df['office_long'].values)
-    df['outside_300m'] = (df['dist_km'] > 0.3).astype(int)
-    df['very_far']     = (df['dist_km'] > 5.0).astype(int)
-    df['extreme_far']  = (df['dist_km'] > 50.0).astype(int)
-    log(f"✅ STEP 6: Haversine — {df['outside_300m'].sum():,} di luar 300m, {df['very_far'].sum():,} >5km")
-
-    # ── STEP 7: Validation Flags ──────────────────────────────
+    # STEP 7: Validation Flags
     df['no_note']          = df['catatan'].isna().astype(int)
     df['far_no_note']      = ((df['outside_300m']==1)&(df['no_note']==1)).astype(int)
     df['far_with_note']    = ((df['outside_300m']==1)&(df['no_note']==0)).astype(int)
-    df['near_but_status0'] = ((df['outside_300m']==0)&(df['status_lokasi']==0)).astype(int)
-    df['far_but_status1']  = ((df['outside_300m']==1)&(df['status_lokasi']==1)).astype(int)
-    log(f"✅ STEP 7: Validation — far_no_note:{df['far_no_note'].sum():,}, far_with_note:{df['far_with_note'].sum():,}")
+    df['near_but_status0'] = ((df['outside_300m']==0)&(df['status_lokasi']==0)).astype(int) if 'status_lokasi' in df.columns else 0
+    df['far_but_status1']  = ((df['outside_300m']==1)&(df['status_lokasi']==1)).astype(int) if 'status_lokasi' in df.columns else 0
+    log(f"✅ STEP 7: Validation flags — far_no_note:{df['far_no_note'].sum():,}")
 
-    # ── STEP 8: ST-DBSCAN ─────────────────────────────────────
+    # STEP 8: ST-DBSCAN
     if not config.get('run_stdbscan', True) or not SKLEARN_OK:
-        df['st_cluster_masuk']  = -1; df['st_cluster_pulang']  = -1
-        df['is_st_noise_masuk'] = 0;  df['is_st_noise_pulang'] = 0
+        df['st_cluster_masuk']=-1; df['st_cluster_pulang']=-1
+        df['is_st_noise_masuk']=0; df['is_st_noise_pulang']=0
         log("⏭️ STEP 8: ST-DBSCAN dilewati")
     else:
-        st_eps_km   = config.get('st_eps_km', 0.1)
-        st_eps_hr   = config.get('st_eps_hours', 1.0)
-        st_min_smp  = config.get('st_min_samples', 3)
-        eps_deg     = st_eps_km / 111.0
-        time_scale  = eps_deg / st_eps_hr
-
+        st_eps_km  = config.get('st_eps_km',0.1)
+        st_eps_hr  = config.get('st_eps_hours',1.0)
+        st_min_smp = config.get('st_min_samples',3)
+        eps_deg    = st_eps_km/111.0
+        time_scale = eps_deg/st_eps_hr
         def stdbscan(subset):
             result = pd.Series(-1, index=df.index, dtype=int)
-            for skpd_id, grp in subset.groupby('id_skpd'):
+            for skpd, grp in subset.groupby('id_skpd'):
                 if len(grp) < st_min_smp: continue
                 X = grp[['lat','long']].copy()
-                X['jam_sc'] = grp['jam_desimal'] * time_scale
-                labels = DBSCAN(eps=eps_deg, min_samples=st_min_smp,
-                                algorithm='auto', metric='euclidean').fit(X.values).labels_
-                max_l = result.max() + 1
-                result.loc[grp.index] = np.where(labels>=0, labels+max_l, -1)
+                X['jam_sc'] = grp['jam_desimal']*time_scale
+                labels = DBSCAN(eps=eps_deg, min_samples=st_min_smp, metric='euclidean').fit(X.values).labels_
+                max_l = result.max()+1
+                result.loc[grp.index] = np.where(labels>=0, labels+max_l,-1)
             return result
-
         df['st_cluster_masuk']  = stdbscan(df[df['jenis']=='M'])
         df['st_cluster_pulang'] = stdbscan(df[df['jenis']=='P'])
-        df['is_st_noise_masuk']  = (df['st_cluster_masuk']  == -1).astype(int)
-        df['is_st_noise_pulang'] = (df['st_cluster_pulang'] == -1).astype(int)
-        log(f"✅ STEP 8: ST-DBSCAN — noise masuk:{df['is_st_noise_masuk'].sum():,} pulang:{df['is_st_noise_pulang'].sum():,}")
+        df['is_st_noise_masuk']  = (df['st_cluster_masuk'] ==-1).astype(int)
+        df['is_st_noise_pulang'] = (df['st_cluster_pulang']==-1).astype(int)
+        log(f"✅ STEP 8: ST-DBSCAN — noise masuk:{df['is_st_noise_masuk'].sum():,}")
 
-    # ── STEP 9: Anomaly Score & Risk Level ────────────────────
+    # STEP 9: Anomaly Score & Risk Level
     sc = pd.Series(0, index=df.index)
-    sc += df.get('extreme_far',       pd.Series(0,index=df.index)) * 3
-    sc += df.get('very_far',          pd.Series(0,index=df.index)) * 2
-    sc += df.get('far_no_note',       pd.Series(0,index=df.index)) * 2
-    sc += df.get('outside_300m',      pd.Series(0,index=df.index)) * 1
-    sc += df.get('is_noise_masuk',    pd.Series(0,index=df.index)) * 1
-    sc += df.get('is_st_noise_masuk', pd.Series(0,index=df.index)) * 1
-    sc += df.get('far_but_status1',   pd.Series(0,index=df.index)) * 1
-    sc -= df.get('far_with_note',     pd.Series(0,index=df.index)) * 1
-    sc  = sc.clip(lower=0)
-    df['anomaly_score'] = sc.astype(int)
-    df['risk_level'] = pd.cut(df['anomaly_score'], bins=[-1,1,3,99],
-                               labels=['LOW','MED','HIGH'])
+    for col,w in [('extreme_far',3),('very_far',2),('far_no_note',2),('outside_300m',1),
+                  ('is_noise_masuk',1),('is_st_noise_masuk',1),('far_but_status1',1)]:
+        sc += df.get(col, pd.Series(0,index=df.index)) * w
+    sc -= df.get('far_with_note', pd.Series(0,index=df.index)) * 1
+    df['anomaly_score'] = sc.clip(lower=0).astype(int)
+    df['risk_level'] = pd.cut(df['anomaly_score'], bins=[-1,1,3,99], labels=['LOW','MED','HIGH'])
     rl = df['risk_level'].value_counts()
-    log(f"✅ STEP 9: Anomaly score — HIGH:{rl.get('HIGH',0):,} MED:{rl.get('MED',0):,} LOW:{rl.get('LOW',0):,}")
+    log(f"✅ STEP 9: Anomaly — HIGH:{rl.get('HIGH',0):,} MED:{rl.get('MED',0):,} LOW:{rl.get('LOW',0):,}")
 
-
-    # ── STEP 10: Pilih & urutkan kolom output sesuai format target ──────────
-    # Kolom ekstra dari preprocessing (tetap disimpan sebagai referensi)
-    # status_presensi_calc dan menit_telat/cepat tetap ada untuk validasi
+    # STEP 10: Pilih kolom output
     keep_cols = [
-        # Core
-        'karyawan_id','lat','long','tanggal_kirim','jenis',
-        'id_skpd','status_lokasi','catatan','approver_status',
-        'status_presensi',
-        # Time features
-        'timestamp_num','jam','menit','jam_desimal','tanggal','weekday',
-        # Spatial
+        'karyawan_id','id_skpd','jenis','tanggal_kirim','tanggal',
+        'lat','long','status_lokasi','catatan','approver_status','status_presensi',
+        'jam','menit','jam_desimal','weekday','timestamp_num',
         'lat_rad','long_rad','office_lat','office_long','dist_km',
-        # Distance flags
         'outside_300m','very_far','extreme_far',
-        # Validation flags
         'no_note','far_no_note','far_with_note','near_but_status0','far_but_status1',
-        # DBSCAN
-        'cluster_masuk','cluster_pulang',
-        'is_noise_masuk','is_noise_pulang',
+        'cluster_masuk','cluster_pulang','is_noise_masuk','is_noise_pulang',
         'cluster_size_masuk','cluster_size_pulang',
-        # ST-DBSCAN
-        'st_cluster_masuk','st_cluster_pulang',
-        'is_st_noise_masuk','is_st_noise_pulang',
-        # Anomaly
+        'st_cluster_masuk','st_cluster_pulang','is_st_noise_masuk','is_st_noise_pulang',
         'anomaly_score','risk_level',
-        # Extra dari preprocessing baru (untuk validasi)
         'menit_telat','menit_cepat','durasi_menit','status_presensi_calc',
+        'jarak','catatan_penolakan','approver_id','approver_at','created_at','nama_skpd',
     ]
-    # Tambahkan kolom raw yang ada tapi belum di keep_cols
-    existing_extra = [c for c in df.columns if c not in keep_cols]
-    final_cols = [c for c in keep_cols if c in df.columns] + existing_extra
-    df = df[final_cols]
-
+    df = df[[c for c in keep_cols if c in df.columns]]
     log(f"✅ STEP 10: Output {len(df.columns)} kolom, {len(df):,} baris")
     return df, logs
 
 
 def page_preprocessing():
     st.markdown("## 🔧 Preprocessing Data Mentah")
-    st.markdown("Upload file absensi **mentah** → otomatis diproses → download hasil.")
+    st.markdown("Pilih file mentah → proses → **download hasil** → upload di halaman 📥 Upload Data.")
+    st.info("💡 **Flow:** ① Pilih file mentah → ② Jalankan Preprocessing → ③ Download CSV/Excel → ④ Upload di halaman **📥 Upload Data** → ⑤ Visualisasi", icon="ℹ️")
 
-    uploaded_raw = st.file_uploader(
-        "📂 Upload file mentah (CSV / Excel)",
-        type=['csv','xlsx'], key='pp_upload')
+    local_files = scan_local_files()
+    src_tab1, src_tab2 = st.tabs(["📂 Pilih dari folder", "⬆️ Upload file baru"])
+    raw_file_bytes = None
+    raw_file_name  = None
 
-    if uploaded_raw is None:
-        st.info("💡 Upload file absensi mentah untuk mulai preprocessing.")
+    with src_tab1:
+        if local_files:
+            col_sel, col_info = st.columns([4, 1])
+            with col_sel:
+                chosen_raw = st.selectbox("Pilih file mentah dari folder", local_files, key='pp_local_pick')
+            with col_info:
+                st.markdown("<br>", unsafe_allow_html=True)
+                if chosen_raw and os.path.exists(chosen_raw):
+                    st.caption(f"{os.path.getsize(chosen_raw)/1024:,.0f} KB")
+            # Hanya simpan ke session saat tombol diklik — BUKAN saat selectbox berubah
+            if st.button("📂 Gunakan File Ini", key='pp_use_local', use_container_width=True):
+                with open(chosen_raw, 'rb') as f_:
+                    raw_file_bytes = f_.read()
+                raw_file_name = chosen_raw
+                st.session_state['pp_raw_bytes'] = raw_file_bytes
+                st.session_state['pp_raw_name']  = raw_file_name
+                st.session_state.pop('pp_df_out', None)  # reset hasil lama
+                st.session_state.pop('pp_logs', None)
+                st.success(f"✅ **{chosen_raw}** siap diproses. Klik 🚀 Jalankan Preprocessing.")
+        else:
+            st.info("Belum ada file di folder. Upload file dulu via tab sebelah.")
+
+    with src_tab2:
+        uploaded_raw = st.file_uploader("Upload file mentah (CSV / Excel)", type=['csv','xlsx'], key='pp_upload')
+        if uploaded_raw is not None:
+            # Hanya update jika file berbeda
+            if st.session_state.get('pp_raw_name') != uploaded_raw.name:
+                raw_file_bytes = uploaded_raw.getvalue()
+                raw_file_name  = uploaded_raw.name
+                st.session_state['pp_raw_bytes'] = raw_file_bytes
+                st.session_state['pp_raw_name']  = raw_file_name
+                st.session_state.pop('pp_df_out', None)
+                st.session_state.pop('pp_logs', None)
+
+    # Ambil dari session (hanya yang sudah dikonfirmasi via tombol)
+    if raw_file_bytes is None:
+        raw_file_bytes = st.session_state.get('pp_raw_bytes')
+        raw_file_name  = st.session_state.get('pp_raw_name')
+
+    if raw_file_bytes is None:
         with st.expander("ℹ️ Kolom yang dibutuhkan", expanded=False):
-            st.markdown("""
-| Kolom | Keterangan |
-|---|---|
-| `karyawan_id` | ID pegawai |
-| `id_skpd` | ID kantor/SKPD |
-| `jenis` | M (masuk) / P (pulang) |
-| `lat`, `long` | Koordinat GPS |
-| `tanggal_kirim` | Waktu absensi |
-| `status_lokasi` | 0/1 dari sistem lama |
-| `catatan` | Keterangan alasan |
-| `masuk_post_time` **atau** `masuk_post_dt` | Batas toleransi masuk |
-| `pulang_pre_time` **atau** `pulang_pre_dt` | Jam minimum pulang |
-| `status_presensi` | Opsional (untuk validasi) |
-""")
+            st.dataframe(pd.DataFrame([
+                ['karyawan_id','ID pegawai','Wajib'],
+                ['id_skpd','ID kantor/SKPD','Wajib'],
+                ['jenis','M (masuk) / P (pulang)','Wajib'],
+                ['lat, long','Koordinat GPS','Wajib'],
+                ['tanggal_kirim','Waktu absensi','Wajib'],
+                ['status_lokasi','0/1 dari sistem lama','Opsional'],
+                ['catatan','Keterangan alasan','Opsional'],
+                ['masuk_post_time / masuk_post_dt','Batas toleransi masuk','Opsional'],
+                ['pulang_pre_time / pulang_pre_dt','Jam minimum pulang','Opsional'],
+                ['status_presensi','Untuk validasi hasil','Opsional'],
+            ], columns=['Kolom','Keterangan','Status']), use_container_width=True, hide_index=True)
         return
 
-    # ── Konfigurasi ────────────────────────────────────────────
+    st.markdown(f"📋 **File terpilih:** `{raw_file_name}`")
+
+    # Konfigurasi
     st.markdown("### ⚙️ Konfigurasi Pipeline")
     c1, c2, c3 = st.columns(3)
     with c1:
-        run_dbscan   = st.checkbox("🔵 Jalankan DBSCAN",    value=True,
-                                   help="Clustering spasial per SKPD")
-        run_stdbscan = st.checkbox("🟣 Jalankan ST-DBSCAN", value=True,
-                                   help="Clustering spasial+temporal")
-        recalc       = st.checkbox("🔄 Hitung ulang status_presensi", value=False,
-                                   help="Override kolom status_presensi yang sudah ada")
+        run_dbscan   = st.checkbox("🔵 Jalankan DBSCAN",    value=True)
+        run_stdbscan = st.checkbox("🟣 Jalankan ST-DBSCAN", value=True)
+        recalc       = st.checkbox("🔄 Hitung ulang status_presensi", value=False)
     with c2:
-        eps_km     = st.number_input("DBSCAN radius (km)",    value=0.1, step=0.05, format="%.2f")
-        min_smp    = st.number_input("DBSCAN min_samples",    value=3, step=1)
-        st_eps_km  = st.number_input("ST-DBSCAN radius (km)", value=0.1, step=0.05, format="%.2f")
+        eps_km    = st.number_input("DBSCAN radius (km)",    value=0.1, step=0.05, format="%.2f")
+        min_smp   = st.number_input("DBSCAN min_samples",    value=3, step=1)
+        st_eps_km = st.number_input("ST-DBSCAN radius (km)", value=0.1, step=0.05, format="%.2f")
     with c3:
         st_eps_hr  = st.number_input("ST-DBSCAN radius (jam)", value=1.0, step=0.5, format="%.1f")
         st_min_smp = st.number_input("ST-DBSCAN min_samples",  value=3, step=1)
 
     config = {
-        'run_dbscan':    run_dbscan,
-        'run_stdbscan':  run_stdbscan,
-        'recalc_status': recalc,
-        'eps_km':        eps_km,
-        'min_samples':   int(min_smp),
-        'st_eps_km':     st_eps_km,
-        'st_eps_hours':  st_eps_hr,
-        'st_min_samples':int(st_min_smp),
+        'run_dbscan':    run_dbscan, 'run_stdbscan': run_stdbscan,
+        'recalc_status': recalc,     'eps_km':        eps_km,
+        'min_samples':   int(min_smp),'st_eps_km':    st_eps_km,
+        'st_eps_hours':  st_eps_hr,  'st_min_samples':int(st_min_smp),
     }
 
-    if not st.button("🚀 Jalankan Preprocessing", type="primary", use_container_width=True):
+    run_btn = st.button("🚀 Jalankan Preprocessing", type="primary", use_container_width=True)
+
+    if not run_btn and 'pp_df_out' not in st.session_state:
         return
 
-    # ── Load raw data ──────────────────────────────────────────
-    with st.spinner("⏳ Membaca file..."):
-        buf = io.BytesIO(uploaded_raw.getvalue())
+    if run_btn:
+        with st.spinner("⏳ Membaca file..."):
+            buf = io.BytesIO(raw_file_bytes)
+            try:
+                df_raw = pd.read_csv(buf) if str(raw_file_name).endswith('.csv') else pd.read_excel(buf)
+            except Exception as e:
+                st.error(f"❌ Gagal membaca file: {e}"); return
+        required = ['karyawan_id','id_skpd','jenis','lat','long','tanggal_kirim']
+        missing = [c for c in required if c not in df_raw.columns]
+        if missing:
+            st.error(f"❌ Kolom wajib tidak ada: {missing}"); return
+        st.info(f"📊 {len(df_raw):,} baris, {len(df_raw.columns)} kolom")
+        progress = st.progress(0, text="Memulai preprocessing...")
         try:
-            if uploaded_raw.name.endswith('.csv'):
-                df_raw = pd.read_csv(buf)
-            else:
-                df_raw = pd.read_excel(buf)
+            progress.progress(10, "Menghitung status & durasi...")
+            df_out, logs = _run_preprocessing(df_raw, config)
+            progress.progress(100, "✅ Selesai!")
+            st.session_state['pp_df_out'] = df_out
+            st.session_state['pp_df_raw'] = df_raw
+            st.session_state['pp_logs']   = logs
         except Exception as e:
-            st.error(f"❌ Gagal membaca file: {e}"); return
+            import traceback
+            st.error(f"❌ Error: {e}")
+            st.code(traceback.format_exc()); return
 
-    st.info(f"📊 File dibaca: **{len(df_raw):,} baris**, **{len(df_raw.columns)} kolom**")
-
-    # ── Cek kolom wajib ────────────────────────────────────────
-    required = ['karyawan_id','id_skpd','jenis','lat','long','tanggal_kirim']
-    missing  = [c for c in required if c not in df_raw.columns]
-    if missing:
-        st.error(f"❌ Kolom wajib tidak ada: `{missing}`"); return
-
-    # ── Jalankan pipeline ──────────────────────────────────────
-    progress = st.progress(0, text="Memulai preprocessing...")
-    try:
-        progress.progress(10, "Step 1-2: Status & Time features...")
-        df_out, logs = _run_preprocessing(df_raw, config)
-        progress.progress(100, "✅ Selesai!")
-    except Exception as e:
-        import traceback
-        st.error(f"❌ Error: {e}")
-        st.code(traceback.format_exc())
+    if 'pp_df_out' not in st.session_state:
         return
+    df_out = st.session_state['pp_df_out']
+    logs   = st.session_state.get('pp_logs', [])
 
-    # ── Tampilkan log ──────────────────────────────────────────
-    st.markdown("### 📋 Log Preprocessing")
-    for log in logs:
-        st.markdown(f"- {log}")
+    # Log
+    if logs:
+        st.markdown("### 📋 Log Preprocessing")
+        for lg in logs:
+            st.markdown(f"- {lg}")
 
-    # ── Ringkasan hasil ────────────────────────────────────────
+    # Ringkasan
     st.markdown("### 📊 Ringkasan Hasil")
-    col1, col2, col3, col4 = st.columns(4)
-    with col1: st.metric("Total Baris",  f"{len(df_out):,}")
-    with col2: st.metric("Karyawan",     f"{df_out['karyawan_id'].nunique():,}")
-    with col3: st.metric("SKPD",         f"{df_out['id_skpd'].nunique():,}")
-    with col4:
-        n_high = (df_out.get('risk_level', pd.Series()) == 'HIGH').sum()
-        st.metric("🔴 HIGH Risk", f"{n_high:,}")
+    c1,c2,c3,c4 = st.columns(4)
+    with c1: st.metric("Total Baris",  f"{len(df_out):,}")
+    with c2: st.metric("Karyawan",     f"{df_out['karyawan_id'].nunique():,}")
+    with c3: st.metric("SKPD",         f"{df_out['id_skpd'].nunique():,}")
+    with c4: st.metric("🔴 HIGH Risk", f"{(df_out.get('risk_level',pd.Series())=='HIGH').sum():,}")
 
-    # Status distribution
     if 'status_presensi_calc' in df_out.columns:
         st.markdown("#### Status Presensi (hasil kalkulasi)")
         vc = df_out['status_presensi_calc'].value_counts()
         order = ['TWM','T2','T3','T4','TWP','PC1','PC2','PC3','PC4']
-        cols_s = st.columns(min(len(vc), 5))
-        for i, s in enumerate([x for x in order if x in vc.index]):
-            with cols_s[i % 5]:
-                st.metric(f"{status_emoji(s)} {s}", f"{vc[s]:,}")
+        sc_cols = st.columns(min(len(vc),5))
+        for i,s in enumerate([x for x in order if x in vc.index]):
+            with sc_cols[i%5]: st.metric(f"{status_emoji(s)} {s}", f"{vc[s]:,}")
 
-    if 'status_presensi' in df_raw.columns and 'status_presensi_calc' in df_out.columns:
-        n_match = (df_out['status_presensi'] == df_out['status_presensi_calc']).sum()
-        pct = n_match / len(df_out) * 100
-        if pct >= 99:
-            st.success(f"✅ Validasi status: **{n_match:,}/{len(df_out):,}** match ({pct:.2f}%)")
-        else:
-            st.warning(f"⚠️ Validasi status: **{n_match:,}/{len(df_out):,}** match ({pct:.2f}%) — ada perbedaan")
-
-    # Risk level
     if 'risk_level' in df_out.columns:
-        st.markdown("#### Risk Level")
-        rc1, rc2, rc3 = st.columns(3)
         rl = df_out['risk_level'].value_counts()
+        rc1,rc2,rc3 = st.columns(3)
         with rc1: st.metric("🔴 HIGH", f"{rl.get('HIGH',0):,}")
         with rc2: st.metric("🟠 MED",  f"{rl.get('MED',0):,}")
         with rc3: st.metric("🟢 LOW",  f"{rl.get('LOW',0):,}")
 
-    # Kolom baru
-    new_cols = ['menit_telat','menit_cepat','durasi_menit','status_presensi_calc',
-                'dist_km','outside_300m','very_far','extreme_far',
-                'no_note','far_no_note','far_with_note',
-                'cluster_masuk','is_noise_masuk','is_st_noise_masuk',
-                'anomaly_score','risk_level']
-    added = [c for c in new_cols if c in df_out.columns and c not in df_raw.columns]
-    if added:
-        st.markdown(f"#### ✨ Kolom baru ditambahkan ({len(added)})")
-        st.code(", ".join(added))
-
     # Preview
-    with st.expander("🔍 Preview 10 baris pertama"):
-        preview_cols = ['karyawan_id','jenis','tanggal_kirim','status_presensi',
-                        'status_presensi_calc','menit_telat','menit_cepat',
-                        'dist_km','anomaly_score','risk_level']
-        preview_cols = [c for c in preview_cols if c in df_out.columns]
-        st.dataframe(df_out[preview_cols].head(10), use_container_width=True)
+    with st.expander("🔍 Preview 10 baris pertama", expanded=True):
+        st.dataframe(df_out.head(10), use_container_width=True)
 
-    # ── Download & Gunakan ────────────────────────────────────
+    # Download & Gunakan
     st.markdown("### 💾 Download & Gunakan Data")
     dl1, dl2 = st.columns(2)
 
@@ -1913,49 +1867,29 @@ def page_preprocessing():
         st.markdown("**⬇️ Download saja**")
         dc1, dc2 = st.columns(2)
         with dc1:
-            csv_buf = df_out.to_csv(index=False).encode('utf-8')
-            st.download_button("📄 CSV",
-                               csv_buf, "absensi_preprocessed.csv", "text/csv",
-                               use_container_width=True)
+            st.download_button("📄 CSV", df_out.to_csv(index=False).encode('utf-8'),
+                               "absensi_preprocessed.csv", "text/csv", use_container_width=True)
         with dc2:
             xl_buf = io.BytesIO()
             df_out.to_excel(xl_buf, index=False)
-            st.download_button("📊 Excel",
-                               xl_buf.getvalue(),
+            st.download_button("📊 Excel", xl_buf.getvalue(),
                                "absensi_preprocessed.xlsx",
                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                use_container_width=True)
 
     with dl2:
-        st.markdown("**▶️ Simpan & Gunakan langsung**")
-        save_name = st.text_input("Nama file", value="absensi_preprocessed.csv",
-                                  key="pp_save_name",
-                                  help="File akan disimpan di direktori app dan muncul di Pilih file lokal")
-        if st.button("💾 Simpan & Load ke App", type="primary", use_container_width=True):
-            try:
-                # Simpan ke disk agar muncul di scan_local_files()
-                save_path = save_name if save_name.endswith(('.csv','.xlsx')) else save_name + '.csv'
-                if save_path.endswith('.xlsx'):
-                    xl_buf2 = io.BytesIO()
-                    df_out.to_excel(xl_buf2, index=False)
-                    with open(save_path, 'wb') as f_:
-                        f_.write(xl_buf2.getvalue())
-                else:
-                    df_out.to_csv(save_path, index=False)
+        st.markdown("**⬇️ Download lalu upload ke halaman Upload Data**")
+        xl_buf2 = io.BytesIO()
+        df_out.to_excel(xl_buf2, index=False)
+        st.download_button("📊 Download Excel",
+                           xl_buf2.getvalue(),
+                           "absensi_preprocessed.xlsx",
+                           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                           use_container_width=True, key='pp_dl_xl')
+        st.info("⬆️ Setelah download, upload file tersebut di halaman **📥 Upload Data**", icon="ℹ️")
 
-                # Langsung load ke session
-                df_mapped, fc, remaps = load_processed_file(
-                    df_out.to_csv(index=False).encode(), save_path)
-                st.session_state['df'] = df_mapped
-                st.session_state['office_centroid'] = build_office_centroid(df_mapped)
-                st.session_state['file_name'] = save_path
-                # Clear cache agar scan_local_files() menemukan file baru
-                st.cache_data.clear()
-                st.success(f"✅ Disimpan sebagai **{save_path}** dan sudah di-load!")
-                st.info("Sekarang bisa ke halaman Visualisasi, atau pilih file ini di Upload Data → Pilih file lokal.")
-                st.rerun()
-            except Exception as e:
-                st.error(f"❌ Gagal menyimpan: {e}")
+
+
 
 
 # ============================================================
@@ -1964,39 +1898,15 @@ def page_preprocessing():
 
 def main():
     # Clear stale cache jika versi berubah (return signature load_processed_file = 3 nilai)
-    if not st.session_state.get('_cache_cleared_v3'):
-        st.cache_data.clear()
-        st.session_state['_cache_cleared_v3'] = True
-
     for key, default in [('df', None), ('office_centroid', pd.DataFrame()),
                          ('watchlist', [])]:
         if key not in st.session_state:
             st.session_state[key] = default
 
-    if st.session_state['df'] is None and not st.session_state.get('_al'):
-        st.session_state['_al'] = True
-        lf = scan_local_files()
-        if lf:
-            try:
-                df, _, _ = load_local_file(lf[0])
-                st.session_state['df'] = df
-                st.session_state['office_centroid'] = build_office_centroid(df)
-                st.session_state['file_name'] = lf[0]
-                st.session_state['_autoloaded'] = lf[0]
-            except Exception:
-                pass
+    # Auto-load dimatikan — user harus upload manual agar tidak load file salah
 
-    page, uploaded, filters = render_sidebar()
+    page, filters = render_sidebar()
 
-    if uploaded is not None:
-        fh = hashlib.md5(uploaded.getvalue()).hexdigest()
-        if st.session_state.get('_fh') != fh:
-            df, _, _ = load_processed_file(uploaded.getvalue(), uploaded.name)
-            st.session_state['df'] = df
-            st.session_state['office_centroid'] = build_office_centroid(df)
-            st.session_state['_fh'] = fh
-            st.session_state['file_name'] = uploaded.name
-            st.session_state.pop('_autoloaded', None)
 
     if st.session_state.get('_autoloaded') and st.session_state['df'] is not None:
         st.sidebar.success(
@@ -2005,11 +1915,10 @@ def main():
 
     pages = {
         "🏠 Beranda":        page_beranda,
-        "📥 Upload Data":    lambda: page_upload(uploaded),
         "🔧 Preprocessing":  page_preprocessing,
+        "📥 Upload Data":    page_upload,
         "📊 Visualisasi":    lambda: page_visualisasi(filters),
         "🎯 Hunting":        page_hunting,
-        "🔮 Prediksi":       page_prediksi,
     }
     pages.get(page, page_beranda)()
 
