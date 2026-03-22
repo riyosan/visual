@@ -1209,10 +1209,9 @@ def page_hunting():
         <span>👤 <b>{df['karyawan_id'].nunique():,}</b></span>
         ""
     </div>""", unsafe_allow_html=True)
-    t1, t2, t3 = st.tabs(["🕵️ By Pegawai", "🏢 By SKPD", "📅 By Tanggal"])
+    t1, t2 = st.tabs(["🕵️ By Pegawai", "🏢 By SKPD"])
     with t1: _hunt_pegawai(df, oc)
     with t2: _hunt_skpd(df, oc)
-    with t3: _hunt_tanggal(df, oc)
 
 
 def _hunt_pegawai(df, oc):
@@ -1237,8 +1236,19 @@ def _hunt_pegawai(df, oc):
             if in_wl: st.session_state['watchlist'].remove(sel)
             else: st.session_state['watchlist'].append(sel)
             st.rerun()
-    de = df[df['karyawan_id'] == sel].sort_values('tanggal_kirim')
-    if de.empty: st.warning("Tidak ada data."); return
+    de_full = df[df['karyawan_id'] == sel].sort_values('tanggal_kirim')
+    if de_full.empty: st.warning("Tidak ada data."); return
+
+    # Filter tanggal
+    mn_p = pd.to_datetime(de_full['tanggal_kirim'].min()).date()
+    mx_p = pd.to_datetime(de_full['tanggal_kirim'].max()).date()
+    dr_p = st.date_input("📅 Rentang Tanggal", value=(mn_p, mx_p),
+                         min_value=mn_p, max_value=mx_p, key='hp_dr')
+    d_s_p, d_e_p = (dr_p if isinstance(dr_p, tuple) and len(dr_p)==2 else (dr_p, dr_p))
+    de = de_full[(de_full['tanggal_kirim'].dt.date >= d_s_p) &
+                 (de_full['tanggal_kirim'].dt.date <= d_e_p)]
+    if de.empty: st.warning("Tidak ada data di rentang ini."); return
+
     tot = len(de); nb = de['is_bermasalah'].sum()
     skpd_e = de['id_skpd'].mode()[0]
     avg_km = de['dist_km'].mean() if 'dist_km' in de.columns else 0
@@ -1355,8 +1365,19 @@ def _hunt_skpd(df, oc):
     sel_s = st.selectbox("🏢 SKPD", skpds,
         format_func=lambda x: f"SKPD {x} ({len(df[df['id_skpd']==x]):,} absensi)",
         key='hs_id')
-    ds = df[df['id_skpd'] == sel_s].copy()
-    if ds.empty: st.warning("Tidak ada data."); return
+    ds_full = df[df['id_skpd'] == sel_s].copy()
+    if ds_full.empty: st.warning("Tidak ada data."); return
+
+    # Filter tanggal
+    mn_s = pd.to_datetime(ds_full['tanggal_kirim'].min()).date()
+    mx_s = pd.to_datetime(ds_full['tanggal_kirim'].max()).date()
+    dr_s = st.date_input("📅 Rentang Tanggal", value=(mn_s, mx_s),
+                         min_value=mn_s, max_value=mx_s, key='hs_dr')
+    d_s_s, d_e_s = (dr_s if isinstance(dr_s, tuple) and len(dr_s)==2 else (dr_s, dr_s))
+    ds = ds_full[(ds_full['tanggal_kirim'].dt.date >= d_s_s) &
+                 (ds_full['tanggal_kirim'].dt.date <= d_e_s)]
+    if ds.empty: st.warning("Tidak ada data di rentang ini."); return
+
     nk = ds['karyawan_id'].nunique(); nb = ds['is_bermasalah'].sum();     st.markdown(f"""<div class="metric-grid">
         <div class="metric-card mc-blue"><div class="metric-val">{len(ds):,}</div><div class="metric-lbl">Total</div></div>
         <div class="metric-card mc-blue"><div class="metric-val">{nk}</div><div class="metric-lbl">Karyawan</div></div>
@@ -1370,14 +1391,26 @@ def _hunt_skpd(df, oc):
         pv['indiscipline_n'] = sum(pv.get(s, 0) for s in STATUS_BERMASALAH)
         pv['pct'] = (pv['indiscipline_n'] / pv['total'] * 100).round(1)
         pv = pv.reset_index().sort_values('indiscipline_n', ascending=False)
-        berm_cols = [s for s in STATUS_BERMASALAH if s in pv.columns]
+        top3 = pv.head(3)
+        # Podium cards Top 3
+        medals = ['🥇', '🥈', '🥉']
+        cols3 = st.columns(3)
+        for i, (_, row) in enumerate(top3.iterrows()):
+            with cols3[i]:
+                st.markdown(f"""<div class='metric-card mc-red' style='text-align:center'>
+                    <div style='font-size:2rem'>{medals[i]}</div>
+                    <div class='metric-val'>ID {int(row['karyawan_id'])}</div>
+                    <div class='metric-lbl'>{int(row['indiscipline_n'])} indiscipline</div>
+                    <div class='metric-lbl'>{row['pct']:.1f}% dari {int(row['total'])} absensi</div>
+                </div>""", unsafe_allow_html=True)
+        # Bar chart top 3
+        berm_cols = [s for s in STATUS_BERMASALAH if s in top3.columns]
         if berm_cols:
-            fig = px.bar(pv.head(15), x='karyawan_id', y=berm_cols,
-                         title=f'Top 15 SKPD {sel_s}',
+            fig = px.bar(top3, x='karyawan_id', y=berm_cols,
+                         title=f'Top 3 Indiscipline — SKPD {sel_s}',
                          color_discrete_map=STATUS_COLORS, barmode='stack')
-            fig.update_xaxes(type='category'); fig.update_layout(height=380)
+            fig.update_xaxes(type='category'); fig.update_layout(height=320)
             st.plotly_chart(fig, use_container_width=True)
-        st.dataframe(pv.head(30), use_container_width=True, height=320)
     with t2:
         mp = folium.Map(location=[ds['lat'].median(), ds['long'].median()],
                         zoom_start=13, tiles='CartoDB positron')
@@ -1421,93 +1454,8 @@ def _hunt_skpd(df, oc):
                 st.plotly_chart(fig, use_container_width=True)
 
 
-def _hunt_tanggal(df, oc):
-    st.markdown("""<div class="section-header"><span style="font-size:1.5rem">📅</span>
-        <div><div style="font-size:1.1rem;font-weight:700;color:#2c3e50">Hunt by Tanggal</div></div>
-    </div>""", unsafe_allow_html=True)
-    if 'tanggal' not in df.columns: st.warning("Kolom tanggal tidak ada."); return
-    # Konversi ke date object agar timedelta bisa dipakai
-    mn = pd.to_datetime(df['tanggal'].min()).date()
-    mx = pd.to_datetime(df['tanggal'].max()).date()
-    c1, c2 = st.columns(2)
-    with c1:
-        dr = st.date_input("📅 Rentang", value=(mx - timedelta(days=6), mx),
-                           min_value=mn, max_value=mx, key='hd_dr')
-    with c2:
-        fs = st.multiselect("Filter Status", STATUS_ORDER, default=STATUS_ORDER,
-                            key='hd_fs', format_func=lambda x: f"{status_emoji(x)} {x}")
-    d_s, d_e = (dr if isinstance(dr, tuple) and len(dr)==2 else (dr, dr))
-    dd = df[(df['tanggal'].astype('datetime64[ns]') >= pd.Timestamp(d_s)) &
-            (df['tanggal'].astype('datetime64[ns]') <= pd.Timestamp(d_e))].copy()
-    if fs: dd = dd[dd['status_presensi'].isin(fs)]
-    if dd.empty: st.warning("Tidak ada data."); return
-    nb = dd['is_bermasalah'].sum()
-    st.markdown(f"""<div class="metric-grid">
-        <div class="metric-card mc-blue"><div class="metric-val">{len(dd):,}</div><div class="metric-lbl">Absensi</div></div>
-        <div class="metric-card mc-blue"><div class="metric-val">{dd['karyawan_id'].nunique()}</div><div class="metric-lbl">Karyawan</div></div>
-        <div class="metric-card mc-red"><div class="metric-val">{nb:,}</div><div class="metric-lbl">Indiscipline</div></div>
-    </div>""", unsafe_allow_html=True)
-    t1, t2, t3, t4 = st.tabs(["🗺️ Peta","⏰ Jam","🚨 Karyawan","🔍 Deteksi Titipan"])
-    with t1:
-        MAX = 1500
-        disp = dd.sample(MAX, random_state=42) if len(dd) > MAX else dd
-        mp = folium.Map(location=[disp['lat'].median(), disp['long'].median()],
-                        zoom_start=13, tiles='CartoDB positron')
-        mc = MarkerCluster(name='Absensi').add_to(mp)
-        for _, row in disp.iterrows():
-            fc = status_folium_color(row.get('status_presensi',''))
-            folium.CircleMarker([row['lat'],row['long']], radius=7,
-                color=fc, fill=True, fill_color=fc, fill_opacity=0.75,
-                popup=folium.Popup(build_popup(row), max_width=230)).add_to(mc)
-        folium.LayerControl().add_to(mp)
-        st_folium(mp, width=None, height=500, returned_objects=[])
-    with t2:
-        if 'jam' in dd.columns:
-            fig = px.bar(dd.groupby(['jam','status_presensi']).size().reset_index(name='n'),
-                         x='jam', y='n', color='status_presensi', title='Status per Jam',
-                         color_discrete_map=STATUS_COLORS, category_orders={'status_presensi':STATUS_ORDER})
-            fig.add_vrect(x0=7,x1=9,fillcolor='green',opacity=0.07,annotation_text='Masuk')
-            fig.add_vrect(x0=15,x1=17,fillcolor='purple',opacity=0.07,annotation_text='Pulang')
-            st.plotly_chart(fig, use_container_width=True)
-    with t3:
-        emp = dd.groupby(['karyawan_id','id_skpd']).agg(
-            n_abs=('karyawan_id','count'), n_berm=('is_bermasalah','sum')).reset_index()
-        emp = emp.sort_values('n_berm', ascending=False)
-        min_b = st.slider("Min indiscipline", 0, max(1, int(emp['n_berm'].max())), 0, key='hd_mb')
-        st.dataframe(emp[emp['n_berm'] >= min_b], use_container_width=True, height=380)
-    with t4:
-        st.markdown("#### 🔍 Deteksi Titipan Absensi")
-        cr1, cr2 = st.columns(2)
-        with cr1: rad = st.slider("Radius (m)", 5, 200, 50, 5, key='hd_r')
-        with cr2: win = st.slider("Jendela (mnt)", 1, 60, 15, 1, key='hd_w')
-        n_ck = len(dd)
-        if n_ck * (n_ck - 1) // 2 > 500000:
-            st.warning("Terlalu banyak data. Perkecil rentang tanggal.")
-        elif st.button("🔍 Deteksi Sekarang", type="primary", key='hd_det'):
-            with st.spinner("⏳ Menganalisis..."):
-                ck = dd[['karyawan_id','lat','long','tanggal_kirim']].dropna()
-                rows_list = ck.to_dict('records')
-                sus = []
-                for i in range(len(rows_list)):
-                    for j in range(i+1, len(rows_list)):
-                        r1, r2 = rows_list[i], rows_list[j]
-                        if r1['karyawan_id'] == r2['karyawan_id']: continue
-                        dm = haversine(r1['lat'],r1['long'],r2['lat'],r2['long'])
-                        if dm > rad: continue
-                        dt = abs((pd.Timestamp(r1['tanggal_kirim']) -
-                                  pd.Timestamp(r2['tanggal_kirim'])).total_seconds()) / 60
-                        if dt <= win:
-                            sus.append({'Karyawan A':r1['karyawan_id'],'Karyawan B':r2['karyawan_id'],
-                                        'Jarak (m)':round(dm,1),'Selisih (mnt)':round(dt,1)})
-                        if len(sus) >= 300: break
-                    if len(sus) >= 300: break
-                st.session_state['kolusi'] = sus
-        if 'kolusi' in st.session_state:
-            kol = st.session_state['kolusi']
-            if not kol: st.success("✅ Tidak ditemukan pasangan mencurigakan.")
-            else:
-                st.error(f"🚨 {len(kol)} pasangan mencurigakan!")
-                st.dataframe(pd.DataFrame(kol), use_container_width=True)
+
+
 
 
 # ============================================================
