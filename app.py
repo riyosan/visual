@@ -1,25 +1,10 @@
-# """
-# Visualisasi & Analisis Absensi v3
-# Status Presensi: T2/T3/T4/TWM/TWP/PC1-4 dari kolom status_presensi
+"""
+Visualisasi & Analisis Absensi v3
+Status Presensi: T2/T3/T4/TWM/TWP/PC1-4 dari kolom status_presensi
 
-# PREPROCESSING: saat ini DINONAKTIFKAN dari navigasi.
-# Untuk mengaktifkan kembali, cari komentar "AKTIFKAN PREPROCESSING" dan ikuti petunjuknya.
-# Cara mengaktifkan Preprocessing kembali di masa depan
-# Cukup 2 baris yang perlu di-uncomment di app_v3.py:
-# Lokasi 1 — di render_sidebar() sekitar baris 399–400, ganti:
-# pythonnav_pages = ["🏠 Beranda", "📥 Upload Data", "📊 Visualisasi", "🎯 Hunting"]
-# dengan baris yang sudah ada di bawahnya (tinggal hapus #):
-# pythonnav_pages = ["🏠 Beranda", "🔧 Preprocessing", "📥 Upload Data", "📊 Visualisasi", "🎯 Hunting"]
-# Lokasi 2 — di main() bagian dict pages, hapus # di depan:
-# python# "🔧 Preprocessing": page_preprocessing,  # ← UNCOMMENT untuk aktifkan kembali
-# """
-# """
-# Visualisasi & Analisis Absensi v3
-# Status Presensi: T2/T3/T4/TWM/TWP/PC1-4 dari kolom status_presensi
-
-# PREPROCESSING: saat ini DINONAKTIFKAN dari navigasi.
-# Untuk mengaktifkan kembali, cari komentar "AKTIFKAN PREPROCESSING" dan ikuti petunjuknya.
-# """
+PREPROCESSING: saat ini DINONAKTIFKAN dari navigasi.
+Untuk mengaktifkan kembali, cari komentar "AKTIFKAN PREPROCESSING" dan ikuti petunjuknya.
+"""
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -552,6 +537,7 @@ def page_upload():
             st.session_state['_loaded_fc']      = fc
             st.session_state['_loaded_rem']     = remaps
             st.session_state['_loaded_src']     = chosen
+            st.session_state['_nav_target'] = '📊 Visualisasi'
             _finalize(df, fc, remaps, chosen)
             return
 
@@ -568,6 +554,7 @@ def page_upload():
         st.session_state['_loaded_fc']      = fc
         st.session_state['_loaded_rem']     = remaps
         st.session_state['_loaded_src']     = uploaded_page.name
+        st.session_state['_nav_target'] = '📊 Visualisasi'
         _finalize(df, fc, remaps, uploaded_page.name)
         return
 
@@ -618,6 +605,7 @@ def _finalize(df, fixed_cols, remaps, source):
         st.dataframe(df.head(10), use_container_width=True)
     if st.button("✅ Gunakan Data Ini", type="primary", use_container_width=True):
         st.session_state['_manual_load'] = True
+        st.session_state['_nav_target']  = '📊 Visualisasi'
         st.rerun()
 
 # ============================================================
@@ -739,17 +727,27 @@ def _vis_overview(df):
         if not masuk.empty:
             vm = masuk['status_presensi'].value_counts().reset_index()
             vm.columns=['status_presensi','count']
-            fig = px.pie(vm, values='count', names='status_presensi', title='🟢 MASUK',
+            fig = px.pie(vm, values='count', names='status_presensi', title='⬆️ Absensi Masuk',
                          color='status_presensi', color_discrete_map=STATUS_COLORS, hole=0.4)
-            fig.update_layout(height=340); st.plotly_chart(fig, use_container_width=True)
+            fig.update_layout(height=340,
+                legend=dict(itemsizing='constant',
+                            font=dict(size=12),
+                            bgcolor='rgba(0,0,0,0)'))
+            fig.update_traces(marker=dict(line=dict(color='white', width=1)))
+            st.plotly_chart(fig, use_container_width=True)
     with cr2:
         pulang = df[df['jenis']=='P']
         if not pulang.empty:
             vp = pulang['status_presensi'].value_counts().reset_index()
             vp.columns=['status_presensi','count']
-            fig = px.pie(vp, values='count', names='status_presensi', title='🔴 PULANG',
+            fig = px.pie(vp, values='count', names='status_presensi', title='⬇️ Absensi Pulang',
                          color='status_presensi', color_discrete_map=STATUS_COLORS, hole=0.4)
-            fig.update_layout(height=340); st.plotly_chart(fig, use_container_width=True)
+            fig.update_layout(height=340,
+                legend=dict(itemsizing='constant',
+                            font=dict(size=12),
+                            bgcolor='rgba(0,0,0,0)'))
+            fig.update_traces(marker=dict(line=dict(color='white', width=1)))
+            st.plotly_chart(fig, use_container_width=True)
 
 def _vis_map(df, filters, oc):
     if df.empty: st.warning("Tidak ada data."); return
@@ -908,64 +906,7 @@ def _vis_approver(df):
             )
             fig.update_layout(height=380)
             st.plotly_chart(fig, use_container_width=True)
-    base_cols=[c for c in ['karyawan_id','id_skpd','jenis','tanggal_kirim','status_presensi',
-               'dist_km','approver_status','catatan'] if c in df.columns]
-    tabs_a=st.tabs(["📍 Noise di-TERIMA","⏳ Pending"])
-    with tabs_a[0]:
-        noise_cols=[c for c in ['is_noise_masuk','is_noise_pulang',
-                                 'is_st_noise_masuk','is_st_noise_pulang'] if c in df.columns]
-        if not noise_cols:
-            st.info("Kolom noise tidak tersedia. Jalankan preprocessing terlebih dahulu.")
-        else:
-            noise_mask=df[noise_cols].any(axis=1)
-            noise_terima=df[noise_mask&(df['is_terima']==1)]
-            na1,na2,na3=st.columns(3)
-            with na1: st.metric("Total noise",     f"{noise_mask.sum():,}")
-            with na2: st.metric("Noise di-TERIMA", f"{len(noise_terima):,}")
-            with na3: st.metric("Noise di-TOLAK",  f"{(noise_mask&(df['is_tolak']==1)).sum():,}")
-            if len(noise_terima):
-                st.markdown(f"""<div class='alert-box alert-orange'>
-                ⚠️ <b>{len(noise_terima):,} absensi outlier lokasi/waktu di-TERIMA approver</b>
-                </div>""", unsafe_allow_html=True)
-                cols=list(dict.fromkeys([c for c in base_cols+noise_cols if c in noise_terima.columns]))
-                sort_by='dist_km' if 'dist_km' in noise_terima.columns else None
-                out=noise_terima[cols].sort_values(sort_by,ascending=False) if sort_by else noise_terima[cols]
-                st.dataframe(out, use_container_width=True, height=400)
-                st.download_button("⬇️ Download",out.to_csv(index=False).encode(),"noise_terima.csv","text/csv")
-            else:
-                st.success("✅ Tidak ada noise yang di-TERIMA.")
-    with tabs_a[1]:
-        pending=df[df['is_pending']==1]
-        if len(pending):
-            st.markdown(f"""<div class='alert-box alert-blue'>
-            ⏳ <b>{len(pending):,} absensi belum diproses approver</b></div>""", unsafe_allow_html=True)
-            p_vc=pending['status_presensi'].value_counts().reset_index()
-            p_vc.columns=['status_presensi','jumlah']
-            p_vc['prioritas']=p_vc['status_presensi'].apply(
-                lambda s:'🔴 Segera' if s in STATUS_BERMASALAH else '🟢 Normal')
-            pa1,pa2=st.columns(2)
-            with pa1:
-                fig=px.bar(p_vc,x='status_presensi',y='jumlah',color='prioritas',
-                           title='Pending per Status',
-                           color_discrete_map={'🔴 Segera':'#e74c3c','🟢 Normal':'#2ecc71'})
-                st.plotly_chart(fig, use_container_width=True)
-            with pa2:
-                top_p=(pending.groupby('karyawan_id')
-                       .agg(n_pending=('karyawan_id','count'),
-                            n_bermasalah=('is_bermasalah','sum'))
-                       .reset_index().sort_values('n_bermasalah',ascending=False).head(15))
-                fig=px.bar(top_p,x='karyawan_id',y='n_pending',color='n_bermasalah',
-                           title='Top 15 Karyawan Pending Terbanyak',color_continuous_scale='Reds')
-                fig.update_xaxes(type='category'); st.plotly_chart(fig, use_container_width=True)
-            cols=[c for c in base_cols if c in pending.columns]
-            sort_by=['is_bermasalah']+(['dist_km'] if 'dist_km' in pending.columns else [])
-            st.dataframe(pending.sort_values(sort_by,ascending=False)[cols].head(200),
-                         use_container_width=True, height=420)
-            st.download_button("⬇️ Download Pending",
-                               pending.sort_values(sort_by,ascending=False)[cols].to_csv(index=False).encode(),
-                               "pending_approver.csv","text/csv")
-        else:
-            st.success("✅ Tidak ada absensi pending.")
+
 
 def _vis_data(df):
     c1,c2=st.columns(2)
