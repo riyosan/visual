@@ -35,9 +35,9 @@ st.set_page_config(
 # KONSTANTA STATUS
 # ============================================================
 STATUS_CODE_MAP = {
-    'T2':  'TELAT_RINGAN',
-    'T3':  'TELAT_SEDANG',
-    'T4':  'TELAT_BERAT',
+    'T2':  'TELAT_MASUK_RINGAN',
+    'T3':  'TELAT_MASUK_SEDANG',
+    'T4':  'TELAT_MASUK_BERAT',
     'TWM': 'TEPAT_WAKTU_MASUK',
     'TWP': 'TEPAT_WAKTU_PULANG',
     'PC1': 'PULANG_CEPAT',
@@ -50,25 +50,25 @@ STATUS_LEGACY_MAP = {
     'HADIR':         'TEPAT_WAKTU_MASUK',
 }
 STATUS_VALID = {
-    'TELAT_RINGAN', 'TELAT_SEDANG', 'TELAT_BERAT',
+    'TELAT_MASUK_RINGAN', 'TELAT_MASUK_SEDANG', 'TELAT_MASUK_BERAT',
     'TEPAT_WAKTU_MASUK', 'TEPAT_WAKTU_PULANG',
     'PULANG_CEPAT', 'PULANG_CEPAT_RINGAN', 'PULANG_CEPAT_SEDANG', 'PULANG_CEPAT_BERAT',
 }
 STATUS_AMBIGUOUS = {'TELAT', 'PULANG'}
 STATUS_ORDER = [
-    'TELAT_BERAT', 'PULANG_CEPAT_BERAT',
-    'TELAT_SEDANG', 'PULANG_CEPAT_SEDANG',
-    'TELAT_RINGAN', 'PULANG_CEPAT_RINGAN', 'PULANG_CEPAT',
+    'TELAT_MASUK_BERAT', 'PULANG_CEPAT_BERAT',
+    'TELAT_MASUK_SEDANG', 'PULANG_CEPAT_SEDANG',
+    'TELAT_MASUK_RINGAN', 'PULANG_CEPAT_RINGAN', 'PULANG_CEPAT',
     'TEPAT_WAKTU_MASUK', 'TEPAT_WAKTU_PULANG',
 ]
 STATUS_BERMASALAH = {
-    'TELAT_BERAT', 'TELAT_SEDANG',
+    'TELAT_MASUK_BERAT', 'TELAT_MASUK_SEDANG',
     'PULANG_CEPAT_BERAT', 'PULANG_CEPAT_SEDANG',
 }
 STATUS_COLORS = {
-    'TELAT_BERAT':         '#c0392b',
-    'TELAT_SEDANG':        '#e67e22',
-    'TELAT_RINGAN':        '#d4ac0d',
+    'TELAT_MASUK_BERAT':         '#c0392b',
+    'TELAT_MASUK_SEDANG':        '#e67e22',
+    'TELAT_MASUK_RINGAN':        '#d4ac0d',
     'TEPAT_WAKTU_MASUK':   '#27ae60',
     'TEPAT_WAKTU_PULANG':  '#2ecc71',
     'PULANG_CEPAT':        '#f39c12',
@@ -78,9 +78,9 @@ STATUS_COLORS = {
     'UNKNOWN':             '#95a5a6',
 }
 STATUS_EMOJI = {
-    'TELAT_BERAT':         '🔴',
-    'TELAT_SEDANG':        '🟠',
-    'TELAT_RINGAN':        '🟡',
+    'TELAT_MASUK_BERAT':         '🔴',
+    'TELAT_MASUK_SEDANG':        '🟠',
+    'TELAT_MASUK_RINGAN':        '🟡',
     'TEPAT_WAKTU_MASUK':   '🟢',
     'TEPAT_WAKTU_PULANG':  '🟢',
     'PULANG_CEPAT':        '🟡',
@@ -91,9 +91,9 @@ STATUS_EMOJI = {
 }
 STATUS_FOLIUM_HEX = {
     'TEPAT_WAKTU_MASUK':   '#27ae60',
-    'TELAT_RINGAN':        '#f1c40f',
-    'TELAT_SEDANG':        '#e67e22',
-    'TELAT_BERAT':         '#c0392b',
+    'TELAT_MASUK_RINGAN':        '#f1c40f',
+    'TELAT_MASUK_SEDANG':        '#e67e22',
+    'TELAT_MASUK_BERAT':         '#c0392b',
     'TEPAT_WAKTU_PULANG':  '#1abc9c',
     'PULANG_CEPAT':        '#9b59b6',
     'PULANG_CEPAT_RINGAN': '#8e44ad',
@@ -178,9 +178,9 @@ def resolve_ambiguous(df):
 def determine_status_from_jam(jam_desimal, jenis):
     if jenis == 'M':
         if jam_desimal <= 7.5:   return 'TEPAT_WAKTU_MASUK'
-        elif jam_desimal <= 8.0: return 'TELAT_RINGAN'
-        elif jam_desimal <= 9.0: return 'TELAT_SEDANG'
-        else:                    return 'TELAT_BERAT'
+        elif jam_desimal <= 8.0: return 'TELAT_MASUK_RINGAN'
+        elif jam_desimal <= 9.0: return 'TELAT_MASUK_SEDANG'
+        else:                    return 'TELAT_MASUK_BERAT'
     else:
         if jam_desimal >= 16.0:   return 'TEPAT_WAKTU_PULANG'
         elif jam_desimal >= 15.5: return 'PULANG_CEPAT'
@@ -397,16 +397,17 @@ def render_sidebar():
     st.sidebar.markdown("## 🗺️ Analisis Absensi")
     st.sidebar.markdown("---")
 
-    # ── AKTIFKAN PREPROCESSING ─────────────────────────────────────────────
-    # Untuk mengaktifkan halaman Preprocessing kembali:
-    # 1. Tambahkan "🔧 Preprocessing" ke dalam list nav_pages di bawah
-    # 2. Uncomment baris "🔧 Preprocessing": page_preprocessing di fungsi main()
-    # ──────────────────────────────────────────────────────────────────────
     nav_pages = ["🏠 Beranda", "📥 Upload Data", "📊 Visualisasi", "🎯 Hunting"]
-    # nav_pages = ["🏠 Beranda", "🔧 Preprocessing", "📥 Upload Data", "📊 Visualisasi", "🎯 Hunting"]  # ← dengan Preprocessing
 
+    # Baca nav_target, lalu langsung hapus agar tidak nyangkut
     forced = st.session_state.get('_nav_target')
-    default_idx = nav_pages.index(forced) if forced and forced in nav_pages else 0
+    if forced and forced in nav_pages:
+        default_idx = nav_pages.index(forced)
+        st.session_state.pop('_nav_target', None)
+    else:
+        st.session_state.pop('_nav_target', None)
+        default_idx = 0
+
     page = st.sidebar.radio("📌 Navigasi", nav_pages, index=default_idx)
     st.sidebar.markdown("---")
 
@@ -460,11 +461,9 @@ def render_sidebar():
                 st.session_state['watchlist'] = []
                 st.rerun()
 
-    # ── Tombol clear cache (opsional, muncul di sidebar) ────────
     st.sidebar.markdown("---")
     if st.sidebar.button("🗑️ Clear Cache", help="Hapus semua cache — pakai jika ganti dataset atau data terasa tidak update"):
         st.cache_data.clear()
-        # Reset loaded state agar halaman Upload tidak tampil data lama
         for k in ['_loaded_df','_loaded_fc','_loaded_rem','_loaded_src',
                   '_autoloaded','_autoload_attempted','_file_hash']:
             st.session_state.pop(k, None)
@@ -475,26 +474,126 @@ def render_sidebar():
 # ============================================================
 # BERANDA
 # ============================================================
+# ============================================================
+# BERANDA (OPTIMIZED FOR STREAMLIT 1.56.0)
+# ============================================================
+# ============================================================
+# BERANDA (V1.56.0 - PASTEL PALETTE)
+# ============================================================
 def page_beranda():
     st.markdown('<div class="main-header">🗺️ Analisis Absensi Pegawai</div>', unsafe_allow_html=True)
     st.markdown('<p class="sub-header">Upload data → status otomatis terpetakan dari kode mesin</p>',
                 unsafe_allow_html=True)
-    c1,c2,c3 = st.columns(3)
-    with c1: st.info("### 📥 Step 1\n**Upload Data**")
-    with c2: st.success("### 📊 Step 2\n**Visualisasi**")
-    with c3: st.warning("### 🎯 Step 3\n**Hunting**")
+
+    # CSS KHUSUS VERSI 1.56.0 DENGAN WARNA PASTEL CUSTOM
+    st.markdown(f"""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800;900&display=swap');
+
+    /* Selector Utama untuk Button di dalam Column */
+    div[data-testid="stColumn"] button {{
+        min-height: 220px !important;
+        border-radius: 20px !important;
+        font-size: 0.95rem !important;
+        font-weight: 700 !important;
+        text-align: left !important;
+        white-space: pre-wrap !important;
+        line-height: 1.6 !important;
+        padding: 1.8rem 1.6rem !important;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+        font-family: 'Plus Jakarta Sans', sans-serif !important;
+        width: 100% !important;
+        display: flex !important;
+        align-items: flex-start !important;
+        border: 1px solid rgba(0,0,0,0.05) !important;
+    }}
+
+    /* Card 1 — Soft Blue (#e8f2ff) */
+    div[data-testid="stColumn"]:nth-of-type(1) button {{
+        background: #e8f2ff !important;
+        color: #2b5a9a !important;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.03) !important;
+    }}
+
+    /* Card 2 — Soft Green (#e8f9ee) */
+    div[data-testid="stColumn"]:nth-of-type(2) button {{
+        background: #e8f9ee !important;
+        color: #2d6a4f !important;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.03) !important;
+    }}
+
+    /* Card 3 — Soft Yellow (#ffffe7) */
+    div[data-testid="stColumn"]:nth-of-type(3) button {{
+        background: #ffffe7 !important;
+        color: #7a6a00 !important;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.03) !important;
+    }}
+
+    /* Hover Effects - Sedikit lebih gelap saat di-hover agar interaktif */
+    div[data-testid="stColumn"]:nth-of-type(1) button:hover {{ 
+        transform: translateY(-5px); 
+        background: #d4e8ff !important; 
+        box-shadow: 0 12px 25px rgba(43,90,154,0.12) !important;
+    }}
+    div[data-testid="stColumn"]:nth-of-type(2) button:hover {{ 
+        transform: translateY(-5px); 
+        background: #d4f2dc !important; 
+        box-shadow: 0 12px 25px rgba(45,106,79,0.1) !important;
+    }}
+    div[data-testid="stColumn"]:nth-of-type(3) button:hover {{ 
+        transform: translateY(-5px); 
+        background: #fdfdbb !important; 
+        box-shadow: 0 12px 25px rgba(122,106,0,0.08) !important;
+    }}
+
+    /* Meratakan teks ke kiri untuk Markdown di dalam Button */
+    div[data-testid="stColumn"] button div[data-testid="stMarkdownContainer"] p {{
+        text-align: left !important;
+        margin: 0 !important;
+    }}
+    </style>
+    """, unsafe_allow_html=True)
+
+    c1, c2, c3 = st.columns(3)
+
+    with c1:
+        if st.button(
+            "📥  Step 1\n\nUpload Data\n\nUpload file absensi CSV/Excel,\natau pilih dataset yang\nsudah tersedia",
+            use_container_width=True, key="pastel_upload"
+        ):
+            st.session_state['_nav_target'] = '📥 Upload Data'
+            st.rerun()
+
+    with c2:
+        if st.button(
+            "📊  Step 2\n\nVisualisasi\n\nPeta interaktif, analisis\ntemporal, distribusi jarak,\ndan statistik anomali.",
+            use_container_width=True, key="pastel_vis"
+        ):
+            st.session_state['_nav_target'] = '📊 Visualisasi'
+            st.rerun()
+
+    with c3:
+        if st.button(
+            "🎯  Step 3\n\nHunting Mode\n\nInvestigasi lebih lanjut\nper pegawai dan per SKPD.                                                       ",
+            use_container_width=True, key="pastel_hunt"
+        ):
+            st.session_state['_nav_target'] = '🎯 Hunting'
+            st.rerun()
+
     st.markdown("---")
+    # Sisa kode tabel mapping kamu (st.dataframe) bisa dilanjutkan di sini
     st.markdown("### 📋 Mapping Kode → Label (dari kolom `status_presensi`)")
     st.markdown("**MASUK** — diukur dari `masuk_post_time`:")
     st.dataframe(pd.DataFrame([
         ['TWM','TEPAT_WAKTU_MASUK',  '🟢','≤ 0 menit',   'Absen jam 08:10, toleransi s/d 08:15 → aman'],
-        ['T2', 'TELAT_RINGAN',       '🟡','0–14 menit',  'Absen jam 08:20 → telat 4 menit'],
-        ['T3', 'TELAT_SEDANG',       '🟠','14–44 menit', 'Absen jam 08:40 → telat 25 menit'],
-        ['T4', 'TELAT_BERAT',        '🔴','> 44 menit',  'Absen jam 10:00 → telat 104 menit'],
+        ['T2', 'TELAT_MASUK_RINGAN',       '🟡','0–14 menit',  'Absen jam 08:20 → telat 4 menit'],
+        ['T3', 'TELAT_MASUK_SEDANG',       '🟠','14–44 menit', 'Absen jam 08:40 → telat 25 menit'],
+        ['T4', 'TELAT_MASUK_BERAT',        '🔴','> 44 menit',  'Absen jam 10:00 → telat 104 menit'],
     ], columns=['Kode','Label','','Durasi Telat','Contoh']), use_container_width=True, hide_index=True)
     st.markdown("**PULANG** — diukur dari `pulang_pre_time`:")
     st.dataframe(pd.DataFrame([
-        ['TWP','TEPAT_WAKTU_PULANG', '🟢','≤ 0 menit',   'Pulang jam 16:35, minimum 16:30 → aman'],
+        ['TWP','TEPAT_WAKTU_PULANG (Shift 1)', '🟢','≤ 0 menit',   'Pulang jam 16:35, minimum 16:30 → aman'],
+        ['TWP','TEPAT_WAKTU_PULANG (Shift 2)', '🟢','≤ 0 menit',   'Pulang jam 17:00, minimum 17:00 → aman'],
         ['PC1','PULANG_CEPAT',       '🟡','0–30 menit',  'Pulang jam 16:20 → 10 mnt terlalu cepat'],
         ['PC2','PULANG_CEPAT_RINGAN','🟡','30–60 menit', 'Pulang jam 15:45 → 45 mnt terlalu cepat'],
         ['PC3','PULANG_CEPAT_SEDANG','🟠','60–90 menit', 'Pulang jam 15:10 → 80 mnt terlalu cepat'],
@@ -593,7 +692,7 @@ def _finalize(df, fixed_cols, remaps, source):
     nb = df['is_bermasalah'].sum()
     if nb > 0:
         st.markdown(f"""<div class='alert-box alert-red'>
-        🚨 <b>{nb:,}</b> absensi indiscipline (TELAT_BERAT/SEDANG · PULANG_CEPAT_BERAT/SEDANG)
+        🚨 <b>{nb:,}</b> absensi indiscipline (TELAT_MASUK_BERAT/SEDANG · PULANG_CEPAT_BERAT/SEDANG)
         </div>""", unsafe_allow_html=True)
     if 'approver_status' in df.columns:
         st.markdown("#### 📋 Status Approver")
@@ -861,14 +960,12 @@ def _vis_approver(df):
     n_pending = int(df['is_pending'].sum())
     total_app = n_terima + n_tolak + n_pending
 
-    # ── Metric ringkasan ─────────────────────────────────────
     c1,c2,c3,c4 = st.columns(4)
     with c1: st.metric("✅ TERIMA",  f"{n_terima:,}")
     with c2: st.metric("❌ TOLAK",   f"{n_tolak:,}")
     with c3: st.metric("⏳ PENDING", f"{n_pending:,}")
     with c4: st.metric("Total",      f"{total_app:,}")
 
-    # ── Grafik TERIMA / TOLAK / PENDING ──────────────────────
     agg = pd.DataFrame({
         'Status':  ['TERIMA', 'TOLAK', 'PENDING'],
         'Jumlah':  [n_terima, n_tolak, n_pending],
@@ -948,9 +1045,9 @@ def page_hunting():
         <span>📊 <b>{n:,}</b></span>{' '.join(parts)}
         <span>👤 <b>{df['karyawan_id'].nunique():,}</b></span>
     </div>""", unsafe_allow_html=True)
-    t1,t2=st.tabs(["🕵️ By Pegawai","🏢 By SKPD"])
+    t1, t2 = st.tabs(["🕵️ By Pegawai", "🏢 By SKPD"]) 
     with t1: _hunt_pegawai(df, oc)
-    with t2: _hunt_skpd(df, oc)
+    with t2: _hunt_skpd(df, oc) # Sekarang _hunt_skpd ada di t2 tab utama
 
 def _hunt_pegawai(df, oc):
     st.markdown("""<div class="section-header"><span style="font-size:1.5rem">🕵️</span>
@@ -1103,14 +1200,14 @@ def _hunt_skpd(df, oc):
         <div class="metric-card mc-red"><div class="metric-val">{nb:,}</div><div class="metric-lbl">Indiscipline</div></div>
         <div class="metric-card"><div class="metric-val">{nb/max(len(ds),1)*100:.1f}%</div><div class="metric-lbl">%</div></div>
     </div>""", unsafe_allow_html=True)
-    t1,t2,t3,t4=st.tabs(["🏆 Leaderboard","🔥 Heatmap","📅 Trend","📋 Approver"])
+    t1, t3, t4 = st.tabs(["🏆 Top Indicipline", "📅 Trend", "📋 Approver"])
     with t1:
         pv=ds.groupby(['karyawan_id','status_presensi']).size().unstack(fill_value=0)
         pv['total']=pv.sum(axis=1)
         pv['indiscipline_n']=sum(pv.get(s,0) for s in STATUS_BERMASALAH)
         pv['pct']=(pv['indiscipline_n']/pv['total']*100).round(1)
         pv=pv.reset_index().sort_values('indiscipline_n',ascending=False)
-        top3=pv.head(3); medals=['🥇','🥈','🥉']
+        top3=pv.head(3); medals=['⚠️','⚠️','⚠️']
         cols3=st.columns(3)
         for i,(_,row) in enumerate(top3.iterrows()):
             with cols3[i]:
@@ -1127,18 +1224,18 @@ def _hunt_skpd(df, oc):
                        color_discrete_map=STATUS_COLORS,barmode='stack')
             fig.update_xaxes(type='category'); fig.update_layout(height=320)
             st.plotly_chart(fig, use_container_width=True)
-    with t2:
-        mp=folium.Map(location=[ds['lat'].median(),ds['long'].median()],
-                      zoom_start=13,tiles='CartoDB positron')
-        HeatMap([[r['lat'],r['long'],1+r.get('is_bermasalah',0)*3] for _,r in ds.iterrows()],
-                radius=18,blur=12,gradient={'0.0':'green','0.5':'yellow','1.0':'red'}).add_to(mp)
-        if not oc.empty:
-            off=oc[oc['id_skpd']==sel_s]
-            if not off.empty:
-                o=off.iloc[0]
-                folium.Marker([o['office_lat'],o['office_long']],popup=f"Kantor {sel_s}",
-                    icon=folium.Icon(color='blue',icon='home',prefix='fa')).add_to(mp)
-        st_folium(mp, width=None, height=500, returned_objects=[])
+    # with t2:
+    #     mp=folium.Map(location=[ds['lat'].median(),ds['long'].median()],
+    #                   zoom_start=13,tiles='CartoDB positron')
+    #     HeatMap([[r['lat'],r['long'],1+r.get('is_bermasalah',0)*3] for _,r in ds.iterrows()],
+    #             radius=18,blur=12,gradient={'0.0':'green','0.5':'yellow','1.0':'red'}).add_to(mp)
+    #     if not oc.empty:
+    #         off=oc[oc['id_skpd']==sel_s]
+    #         if not off.empty:
+    #             o=off.iloc[0]
+    #             folium.Marker([o['office_lat'],o['office_long']],popup=f"Kantor {sel_s}",
+    #                 icon=folium.Icon(color='blue',icon='home',prefix='fa')).add_to(mp)
+    #     st_folium(mp, width=None, height=500, returned_objects=[])
     with t3:
         if 'tanggal' in ds.columns:
             daily=ds.groupby(['tanggal','status_presensi']).size().reset_index(name='n')
@@ -1167,15 +1264,6 @@ def _hunt_skpd(df, oc):
 # ============================================================
 # PREPROCESSING (DINONAKTIFKAN)
 # ============================================================
-# Fungsi page_preprocessing() dan _run_preprocessing() tetap ada di sini
-# tapi tidak dipanggil dari navigasi.
-#
-# CARA MENGAKTIFKAN KEMBALI (3 langkah):
-# 1. Di render_sidebar(): ganti nav_pages dengan versi yang ada "🔧 Preprocessing"
-#    (lihat baris yang dikomentari di render_sidebar)
-# 2. Di main(): uncomment baris "🔧 Preprocessing": page_preprocessing
-# 3. Selesai — halaman langsung muncul di sidebar
-#
 def _run_preprocessing(df_raw: pd.DataFrame, config: dict):
     df = df_raw.copy()
     logs = []
