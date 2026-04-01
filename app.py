@@ -818,7 +818,11 @@ def _vis_overview(df):
                      title='Status per SKPD', barmode='stack',
                      color_discrete_map=STATUS_COLORS,
                      category_orders={'status_presensi':STATUS_ORDER})
-        fig.update_xaxes(type='category'); fig.update_layout(height=400)
+        
+        # Mengatur sumbu X jadi kategori dan sumbu Y agar menampilkan angka utuh (tanpa 'k')
+        fig.update_xaxes(type='category')
+        fig.update_layout(height=400, yaxis_tickformat="d") 
+        
         st.plotly_chart(fig, use_container_width=True)
     cl2,cr2 = st.columns(2)
     with cl2:
@@ -866,6 +870,8 @@ def _vis_temporal(df):
         fig = px.bar(df.groupby(['jam','status_presensi']).size().reset_index(name='n'),
                      x='jam', y='n', color='status_presensi', title='Status per Jam',
                      color_discrete_map=STATUS_COLORS, category_orders={'status_presensi':STATUS_ORDER})
+        fig.update_layout(yaxis=dict(tickformat="d")) # Menghapus 'k' di Status per Jam
+        fig.update_layout(yaxis=dict(tickformat=",d"))
         fig.add_vrect(x0=7,x1=9,fillcolor='green',opacity=0.07,annotation_text='Masuk')
         fig.add_vrect(x0=15,x1=17,fillcolor='purple',opacity=0.07,annotation_text='Pulang')
         st.plotly_chart(fig, use_container_width=True)
@@ -894,20 +900,20 @@ def _vis_distance(df):
     with c3: st.metric("Maksimum",        f"{df['dist_km'].max():.3f} km")
     with c4: st.metric("Di luar 300m",    f"{n_out:,} ({n_out/max(len(df),1)*100:.1f}%)")
     with c5: st.metric("Sangat jauh >5km",f"{n_far:,}")
-    cl,cr=st.columns(2)
-    with cl:
-        fig=px.histogram(df[df['dist_km']<=10],x='dist_km',color='status_presensi',
-                         title='Distribusi Jarak ≤10km',nbins=50,color_discrete_map=STATUS_COLORS,
-                         category_orders={'status_presensi':STATUS_ORDER})
-        fig.add_vline(x=0.3,line_dash='dash',line_color='red',annotation_text='300m')
-        fig.update_layout(height=380); st.plotly_chart(fig, use_container_width=True)
-    with cr:
-        fig=px.box(df[df['dist_km']<=10],x='id_skpd',y='dist_km',color='status_presensi',
-                   title='Distribusi Jarak per SKPD',color_discrete_map=STATUS_COLORS,
-                   category_orders={'status_presensi':STATUS_ORDER})
-        fig.add_hline(y=0.3,line_dash='dash',line_color='red',annotation_text='300m')
-        fig.update_xaxes(type='category'); fig.update_layout(height=380)
-        st.plotly_chart(fig, use_container_width=True)
+    # Menghapus pembagian kolom (cl, cr) agar menjadi landscape/penuh
+    fig=px.histogram(df[df['dist_km']<=10], x='dist_km', color='status_presensi',
+                     title='Distribusi Jarak ≤10km', nbins=100, # nbins ditambah agar lebih detail di landscape
+                     color_discrete_map=STATUS_COLORS,
+                     category_orders={'status_presensi':STATUS_ORDER})
+    fig.update_layout(yaxis=dict(tickformat="d")) # Menghapus 'k' di Histogram Jarak
+    fig.add_vline(x=0.3, line_dash='dash', line_color='red', annotation_text='300m')
+    
+    # Update layout: Tinggi dikurangi sedikit (optional) agar pas di layar, 
+    # dan lebar otomatis mengikuti container (landscape)
+    fig.update_layout(height=450) 
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Bagian Distribusi Jarak per SKPD (Box Plot) sudah dihapus/tidak dipanggil lagi
     cl2,cr2=st.columns(2)
     with cl2:
         zone=pd.DataFrame({'Zona':['Dalam 300m','Di luar 300m'],
@@ -938,6 +944,7 @@ def _vis_employee(df):
         if berm_cols:
             fig=px.bar(top,x='karyawan_id',y=berm_cols,title='Top 15 Indiscipline',
                        color_discrete_map=STATUS_COLORS,barmode='stack')
+            fig.update_layout(yaxis=dict(tickformat="d")) # Menghapus 'k' di Ranking Karyawan
             fig.update_xaxes(type='category'); st.plotly_chart(fig, use_container_width=True)
     with cr:
         fig=px.scatter(pivot,x='total',y='indiscipline_pct',size='indiscipline_n',
