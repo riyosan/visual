@@ -1,6 +1,6 @@
 """
 Visualisasi & Analisis Absensi v3
-Status Presensi: T2/T3/T4/TWM/TWP/PC1-4 dari kolom status_presensi
+Status Presensi: T1/T2/T3/T4/TWM/TWP/PC1-4 dari kolom status_presensi
 
 PREPROCESSING: saat ini DINONAKTIFKAN dari navigasi.
 Untuk mengaktifkan kembali, cari komentar "AKTIFKAN PREPROCESSING" dan ikuti petunjuknya.
@@ -35,9 +35,10 @@ st.set_page_config(
 # KONSTANTA STATUS
 # ============================================================
 STATUS_CODE_MAP = {
-    'T2':  'TELAT_MASUK_RINGAN',
-    'T3':  'TELAT_MASUK_SEDANG',
-    'T4':  'TELAT_MASUK_BERAT',
+    'T1':  'TELAT_MASUK_RINGAN',
+    'T2':  'TELAT_MASUK_SEDANG',
+    'T3':  'TELAT_MASUK_BERAT',
+    'T4':  'TELAT_MASUK_SANGAT_BERAT',
     'TWM': 'TEPAT_WAKTU_MASUK',
     'TWP': 'TEPAT_WAKTU_PULANG',
     'PC1': 'PULANG_CEPAT',
@@ -50,56 +51,60 @@ STATUS_LEGACY_MAP = {
     'HADIR':         'TEPAT_WAKTU_MASUK',
 }
 STATUS_VALID = {
-    'TELAT_MASUK_RINGAN', 'TELAT_MASUK_SEDANG', 'TELAT_MASUK_BERAT',
+    'TELAT_MASUK_RINGAN', 'TELAT_MASUK_SEDANG', 'TELAT_MASUK_BERAT', 'TELAT_MASUK_SANGAT_BERAT',
     'TEPAT_WAKTU_MASUK', 'TEPAT_WAKTU_PULANG',
     'PULANG_CEPAT', 'PULANG_CEPAT_RINGAN', 'PULANG_CEPAT_SEDANG', 'PULANG_CEPAT_BERAT',
 }
 STATUS_AMBIGUOUS = {'TELAT', 'PULANG'}
 STATUS_ORDER = [
-    'TELAT_MASUK_BERAT', 'PULANG_CEPAT_BERAT',
-    'TELAT_MASUK_SEDANG', 'PULANG_CEPAT_SEDANG',
-    'TELAT_MASUK_RINGAN', 'PULANG_CEPAT_RINGAN', 'PULANG_CEPAT',
+    'TELAT_MASUK_SANGAT_BERAT', 'PULANG_CEPAT_BERAT',
+    'TELAT_MASUK_BERAT', 'PULANG_CEPAT_SEDANG',
+    'TELAT_MASUK_SEDANG', 'PULANG_CEPAT_RINGAN', 'PULANG_CEPAT',
+    'TELAT_MASUK_RINGAN',
     'TEPAT_WAKTU_MASUK', 'TEPAT_WAKTU_PULANG',
 ]
 STATUS_BERMASALAH = {
-    'TELAT_MASUK_BERAT', 'TELAT_MASUK_SEDANG',
+    'TELAT_MASUK_SANGAT_BERAT', 'TELAT_MASUK_BERAT', 'TELAT_MASUK_SEDANG',
     'PULANG_CEPAT_BERAT', 'PULANG_CEPAT_SEDANG',
 }
 STATUS_COLORS = {
+    'TELAT_MASUK_SANGAT_BERAT':  '#6e0d0d',
     'TELAT_MASUK_BERAT':         '#c0392b',
     'TELAT_MASUK_SEDANG':        '#e67e22',
     'TELAT_MASUK_RINGAN':        '#d4ac0d',
-    'TEPAT_WAKTU_MASUK':   '#27ae60',
-    'TEPAT_WAKTU_PULANG':  '#2ecc71',
-    'PULANG_CEPAT':        '#f39c12',
-    'PULANG_CEPAT_RINGAN': '#d4ac0d',
-    'PULANG_CEPAT_SEDANG': '#e67e22',
-    'PULANG_CEPAT_BERAT':  '#c0392b',
-    'UNKNOWN':             '#95a5a6',
+    'TEPAT_WAKTU_MASUK':         '#27ae60',
+    'TEPAT_WAKTU_PULANG':        '#2ecc71',
+    'PULANG_CEPAT':              '#f39c12',
+    'PULANG_CEPAT_RINGAN':       '#d4ac0d',
+    'PULANG_CEPAT_SEDANG':       '#e67e22',
+    'PULANG_CEPAT_BERAT':        '#c0392b',
+    'UNKNOWN':                   '#95a5a6',
 }
 STATUS_EMOJI = {
+    'TELAT_MASUK_SANGAT_BERAT':  '⛔',
     'TELAT_MASUK_BERAT':         '🔴',
     'TELAT_MASUK_SEDANG':        '🟠',
     'TELAT_MASUK_RINGAN':        '🟡',
-    'TEPAT_WAKTU_MASUK':   '🟢',
-    'TEPAT_WAKTU_PULANG':  '🟢',
-    'PULANG_CEPAT':        '🟡',
-    'PULANG_CEPAT_RINGAN': '🟡',
-    'PULANG_CEPAT_SEDANG': '🟠',
-    'PULANG_CEPAT_BERAT':  '🔴',
-    'UNKNOWN':             '⚪',
+    'TEPAT_WAKTU_MASUK':         '🟢',
+    'TEPAT_WAKTU_PULANG':        '🟢',
+    'PULANG_CEPAT':              '🟡',
+    'PULANG_CEPAT_RINGAN':       '🟡',
+    'PULANG_CEPAT_SEDANG':       '🟠',
+    'PULANG_CEPAT_BERAT':        '🔴',
+    'UNKNOWN':                   '⚪',
 }
 STATUS_FOLIUM_HEX = {
-    'TEPAT_WAKTU_MASUK':   '#27ae60',
+    'TEPAT_WAKTU_MASUK':         '#27ae60',
     'TELAT_MASUK_RINGAN':        '#f1c40f',
     'TELAT_MASUK_SEDANG':        '#e67e22',
     'TELAT_MASUK_BERAT':         '#c0392b',
-    'TEPAT_WAKTU_PULANG':  '#1abc9c',
-    'PULANG_CEPAT':        '#9b59b6',
-    'PULANG_CEPAT_RINGAN': '#8e44ad',
-    'PULANG_CEPAT_SEDANG': '#e74c3c',
-    'PULANG_CEPAT_BERAT':  '#922b21',
-    'UNKNOWN':             '#95a5a6',
+    'TELAT_MASUK_SANGAT_BERAT':  '#6e0d0d',
+    'TEPAT_WAKTU_PULANG':        '#1abc9c',
+    'PULANG_CEPAT':              '#9b59b6',
+    'PULANG_CEPAT_RINGAN':       '#8e44ad',
+    'PULANG_CEPAT_SEDANG':       '#e74c3c',
+    'PULANG_CEPAT_BERAT':        '#922b21',
+    'UNKNOWN':                   '#95a5a6',
 }
 
 # ============================================================
@@ -177,10 +182,11 @@ def resolve_ambiguous(df):
 
 def determine_status_from_jam(jam_desimal, jenis):
     if jenis == 'M':
-        if jam_desimal <= 7.5:   return 'TEPAT_WAKTU_MASUK'
-        elif jam_desimal <= 8.0: return 'TELAT_MASUK_RINGAN'
-        elif jam_desimal <= 9.0: return 'TELAT_MASUK_SEDANG'
-        else:                    return 'TELAT_MASUK_BERAT'
+        if jam_desimal <= 8.25:   return 'TEPAT_WAKTU_MASUK'
+        elif jam_desimal <= 8.75: return 'TELAT_MASUK_RINGAN'
+        elif jam_desimal <= 9.25: return 'TELAT_MASUK_SEDANG'
+        elif jam_desimal <= 9.75: return 'TELAT_MASUK_BERAT'
+        else:                     return 'TELAT_MASUK_SANGAT_BERAT'
     else:
         if jam_desimal >= 16.0:   return 'TEPAT_WAKTU_PULANG'
         elif jam_desimal >= 15.5: return 'PULANG_CEPAT'
@@ -204,6 +210,14 @@ def is_bermasalah(s):       return s in STATUS_BERMASALAH
 def _df_hash(df):
     return hashlib.md5(pd.util.hash_pandas_object(df, index=True).values).hexdigest()
 
+def _ensure_all_status_cols(df_pivot, status_list):
+    """Pastikan semua kolom status ada di pivot, isi 0 jika tidak ada.
+    Ini kunci agar TELAT_MASUK_SANGAT_BERAT selalu muncul di chart."""
+    for s in status_list:
+        if s not in df_pivot.columns:
+            df_pivot[s] = 0
+    return df_pivot
+
 # ============================================================
 # FIX DECIMAL
 # ============================================================
@@ -211,7 +225,7 @@ def fix_decimal_columns(df):
     numeric_hints = [
         'lat','long','lat_rad','long_rad','office_lat','office_long',
         'dist_km','jarak','jam_desimal','jam','menit','weekday',
-        'outside_300m','very_far','extreme_far','status_lokasi','timestamp_num',
+        'outside_100m','very_far','extreme_far','status_lokasi','timestamp_num',
     ]
     fixed = []
     for col in df.columns:
@@ -309,10 +323,10 @@ def load_processed_file(file_bytes, file_name):
             a = np.sin((rlat2-rlat1)/2)**2 + np.cos(rlat1)*np.cos(rlat2)*np.sin((rlon2-rlon1)/2)**2
             df['dist_km'] = 6371.0 * 2 * np.arcsin(np.sqrt(np.clip(a,0,1)))
             remaps.append(f"🔧 dist_km dihitung ulang dari koordinat (median lama={median_dist:.0f})")
-        df['outside_300m'] = (df['dist_km'] > 0.3).astype(int)
+        df['outside_100m'] = (df['dist_km'] > 0.1).astype(int)
         df['very_far']     = (df['dist_km'] > 5.0).astype(int)
     elif 'dist_km' in df.columns:
-        df['outside_300m'] = (df['dist_km'] > 0.3).astype(int)
+        df['outside_100m'] = (df['dist_km'] > 0.1).astype(int)
         df['very_far']     = (df['dist_km'] > 5.0).astype(int)
 
     return df, fixed_cols, remaps
@@ -397,9 +411,8 @@ def render_sidebar():
     st.sidebar.markdown("## 🗺️ Analisis Absensi")
     st.sidebar.markdown("---")
 
-    nav_pages = ["🏠 Beranda", "📥 Upload Data", "📊 Visualisasi", "🎯 Hunting"]
+    nav_pages = ["🏠 Beranda", "📥 Upload Data", "📊 Visualisasi", "🎯 Hunting", "🔧 Preprocessing"]
 
-    # Baca nav_target, lalu langsung hapus agar tidak nyangkut
     forced = st.session_state.get('_nav_target')
     if forced and forced in nav_pages:
         default_idx = nav_pages.index(forced)
@@ -447,20 +460,6 @@ def render_sidebar():
                                                'cluster':'🔵 Cluster',
                                                'heatmap':'🔥 Heatmap'}[x])
 
-        wl = st.session_state.get('watchlist', [])
-        if wl:
-            st.sidebar.markdown("---")
-            st.sidebar.markdown("### 👁️ Watchlist")
-            for eid in wl:
-                ed = df[df['karyawan_id']==eid]
-                nb = ed['is_bermasalah'].sum() if not ed.empty else 0
-                st.sidebar.markdown(f"""<div class='watchlist-item'>
-                    <span>🔴</span><span><b>ID {eid}</b> — {nb} indiscipline</span>
-                </div>""", unsafe_allow_html=True)
-            if st.sidebar.button("🗑️ Clear Watchlist"):
-                st.session_state['watchlist'] = []
-                st.rerun()
-
     st.sidebar.markdown("---")
     if st.sidebar.button("🗑️ Clear Cache", help="Hapus semua cache — pakai jika ganti dataset atau data terasa tidak update"):
         st.cache_data.clear()
@@ -474,23 +473,15 @@ def render_sidebar():
 # ============================================================
 # BERANDA
 # ============================================================
-# ============================================================
-# BERANDA (OPTIMIZED FOR STREAMLIT 1.56.0)
-# ============================================================
-# ============================================================
-# BERANDA (V1.56.0 - PASTEL PALETTE)
-# ============================================================
 def page_beranda():
     st.markdown('<div class="main-header">🗺️ Analisis Absensi Pegawai</div>', unsafe_allow_html=True)
     st.markdown('<p class="sub-header">Upload data → status otomatis terpetakan dari kode mesin</p>',
                 unsafe_allow_html=True)
 
-    # CSS KHUSUS VERSI 1.56.0 DENGAN WARNA PASTEL CUSTOM
     st.markdown(f"""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800;900&display=swap');
 
-    /* Selector Utama untuk Button di dalam Column */
     div[data-testid="stColumn"] button {{
         min-height: 220px !important;
         border-radius: 20px !important;
@@ -508,45 +499,40 @@ def page_beranda():
         border: 1px solid rgba(0,0,0,0.05) !important;
     }}
 
-    /* Card 1 — Soft Blue (#e8f2ff) */
     div[data-testid="stColumn"]:nth-of-type(1) button {{
         background: #e8f2ff !important;
         color: #2b5a9a !important;
         box-shadow: 0 4px 15px rgba(0,0,0,0.03) !important;
     }}
 
-    /* Card 2 — Soft Green (#e8f9ee) */
     div[data-testid="stColumn"]:nth-of-type(2) button {{
         background: #e8f9ee !important;
         color: #2d6a4f !important;
         box-shadow: 0 4px 15px rgba(0,0,0,0.03) !important;
     }}
 
-    /* Card 3 — Soft Yellow (#ffffe7) */
     div[data-testid="stColumn"]:nth-of-type(3) button {{
         background: #ffffe7 !important;
         color: #7a6a00 !important;
         box-shadow: 0 4px 15px rgba(0,0,0,0.03) !important;
     }}
 
-    /* Hover Effects - Sedikit lebih gelap saat di-hover agar interaktif */
-    div[data-testid="stColumn"]:nth-of-type(1) button:hover {{ 
-        transform: translateY(-5px); 
-        background: #d4e8ff !important; 
+    div[data-testid="stColumn"]:nth-of-type(1) button:hover {{
+        transform: translateY(-5px);
+        background: #d4e8ff !important;
         box-shadow: 0 12px 25px rgba(43,90,154,0.12) !important;
     }}
-    div[data-testid="stColumn"]:nth-of-type(2) button:hover {{ 
-        transform: translateY(-5px); 
-        background: #d4f2dc !important; 
+    div[data-testid="stColumn"]:nth-of-type(2) button:hover {{
+        transform: translateY(-5px);
+        background: #d4f2dc !important;
         box-shadow: 0 12px 25px rgba(45,106,79,0.1) !important;
     }}
-    div[data-testid="stColumn"]:nth-of-type(3) button:hover {{ 
-        transform: translateY(-5px); 
-        background: #fdfdbb !important; 
+    div[data-testid="stColumn"]:nth-of-type(3) button:hover {{
+        transform: translateY(-5px);
+        background: #fdfdbb !important;
         box-shadow: 0 12px 25px rgba(122,106,0,0.08) !important;
     }}
 
-    /* Meratakan teks ke kiri untuk Markdown di dalam Button */
     div[data-testid="stColumn"] button div[data-testid="stMarkdownContainer"] p {{
         text-align: left !important;
         margin: 0 !important;
@@ -581,34 +567,38 @@ def page_beranda():
             st.rerun()
 
     st.markdown("---")
-    # Sisa kode tabel mapping kamu (st.dataframe) bisa dilanjutkan di sini
+
     st.markdown("### 📋 Mapping Kode → Label (dari kolom `status_presensi`)")
-    st.markdown("**MASUK** — diukur dari `masuk_post_time`:")
+
+    st.markdown("**MASUK** — jam masuk normal: **08:15** | interval telat: **30 menit**")
     st.dataframe(pd.DataFrame([
-        ['TWM','TEPAT_WAKTU_MASUK',  '🟢','≤ 0 menit',   'Absen jam 08:10, toleransi s/d 08:15 → aman'],
-        ['T2', 'TELAT_MASUK_RINGAN',       '🟡','0–14 menit',  'Absen jam 08:20 → telat 4 menit'],
-        ['T3', 'TELAT_MASUK_SEDANG',       '🟠','14–44 menit', 'Absen jam 08:40 → telat 25 menit'],
-        ['T4', 'TELAT_MASUK_BERAT',        '🔴','> 44 menit',  'Absen jam 10:00 → telat 104 menit'],
-    ], columns=['Kode','Label','','Durasi Telat','Contoh']), use_container_width=True, hide_index=True)
+        ['TWM', 'TEPAT_WAKTU_MASUK',        '🟢', '≤ 08:15',        'Absen jam 08:10 → tepat waktu'],
+        ['T1',  'TELAT_MASUK_RINGAN',        '🟡', '08:16 – 08:45',  'Absen jam 08:30 → telat 15 menit'],
+        ['T2',  'TELAT_MASUK_SEDANG',        '🟠', '08:46 – 09:15',  'Absen jam 09:00 → telat 45 menit'],
+        ['T3',  'TELAT_MASUK_BERAT',         '🔴', '09:16 – 09:45',  'Absen jam 09:30 → telat 75 menit'],
+        ['T4',  'TELAT_MASUK_SANGAT_BERAT',  '⛔', '> 09:45',        'Absen jam 10:00 → telat 105 menit'],
+    ], columns=['Kode','Label','','Rentang Jam','Contoh']), use_container_width=True, hide_index=True)
+
     st.markdown("**PULANG** — diukur dari `pulang_pre_time`:")
     st.dataframe(pd.DataFrame([
-        ['TWP','TEPAT_WAKTU_PULANG (Shift 1)', '🟢','≤ 0 menit',   'Pulang jam 16:35, minimum 16:30 → aman'],
-        ['TWP','TEPAT_WAKTU_PULANG (Shift 2)', '🟢','≤ 0 menit',   'Pulang jam 17:00, minimum 17:00 → aman'],
-        ['PC1','PULANG_CEPAT',       '🟡','0–30 menit',  'Pulang jam 16:20 → 10 mnt terlalu cepat'],
-        ['PC2','PULANG_CEPAT_RINGAN','🟡','30–60 menit', 'Pulang jam 15:45 → 45 mnt terlalu cepat'],
-        ['PC3','PULANG_CEPAT_SEDANG','🟠','60–90 menit', 'Pulang jam 15:10 → 80 mnt terlalu cepat'],
-        ['PC4','PULANG_CEPAT_BERAT', '🔴','> 90 menit',  'Pulang jam 13:00 → 210 mnt terlalu cepat'],
-    ], columns=['Kode','Label','','Durasi Pulang Cepat','Contoh']), use_container_width=True, hide_index=True)
+        ['TWP', 'TEPAT_WAKTU_PULANG (Shift 1)', '🟢', '≥ 16:30', 'Pulang jam 16:35 → tepat waktu'],
+        ['TWP', 'TEPAT_WAKTU_PULANG (Shift 2)', '🟢', '≥ 17:00', 'Pulang jam 17:00 → tepat waktu'],
+        ['PC1', 'PULANG_CEPAT',                 '🟡', '16:00 – 16:29', 'Pulang jam 16:20 → 10 mnt terlalu cepat'],
+        ['PC2', 'PULANG_CEPAT_RINGAN',           '🟡', '15:30 – 15:59', 'Pulang jam 15:45 → 45 mnt terlalu cepat'],
+        ['PC3', 'PULANG_CEPAT_SEDANG',           '🟠', '15:00 – 15:29', 'Pulang jam 15:10 → 80 mnt terlalu cepat'],
+        ['PC4', 'PULANG_CEPAT_BERAT',            '🔴', '< 15:00',       'Pulang jam 13:00 → 210 mnt terlalu cepat'],
+    ], columns=['Kode','Label','','Rentang Jam','Contoh']), use_container_width=True, hide_index=True)
+
     st.markdown("### 📋 Kolom yang Dibutuhkan")
     st.dataframe(pd.DataFrame([
-        ['karyawan_id',   'integer', 'ID pegawai',                  'Wajib'],
-        ['id_skpd',       'integer', 'ID kantor/SKPD',              'Wajib'],
-        ['lat / long',    'float',   'Koordinat absensi',           'Wajib'],
-        ['tanggal_kirim', 'datetime','Waktu absensi',               'Wajib'],
-        ['jenis',         'M / P',   'Masuk atau Pulang',           'Wajib'],
-        ['status_presensi','T2..PC4','Kode status dari mesin absen','Wajib'],
-        ['dist_km',       'float',   'Jarak ke kantor (km)',        'Opsional'],
-        ['approver_status','TERIMA/TOLAK','Keputusan atasan',       'Opsional'],
+        ['karyawan_id',    'integer',  'ID pegawai',                   'Wajib'],
+        ['id_skpd',        'integer',  'ID kantor/SKPD',               'Wajib'],
+        ['lat / long',     'float',    'Koordinat absensi',            'Wajib'],
+        ['tanggal_kirim',  'datetime', 'Waktu absensi',                'Wajib'],
+        ['jenis',          'M / P',    'Masuk atau Pulang',            'Wajib'],
+        ['status_presensi','T1..PC4',  'Kode status dari mesin absen', 'Wajib'],
+        ['dist_km',        'float',    'Jarak ke kantor (km)',         'Opsional'],
+        ['approver_status','TERIMA/TOLAK', 'Keputusan atasan',        'Opsional'],
     ], columns=['Kolom','Tipe','Keterangan','Status']), use_container_width=True, hide_index=True)
 
 # ============================================================
@@ -692,7 +682,7 @@ def _finalize(df, fixed_cols, remaps, source):
     nb = df['is_bermasalah'].sum()
     if nb > 0:
         st.markdown(f"""<div class='alert-box alert-red'>
-        🚨 <b>{nb:,}</b> absensi indiscipline (TELAT_MASUK_BERAT/SEDANG · PULANG_CEPAT_BERAT/SEDANG)
+        🚨 <b>{nb:,}</b> absensi indiscipline (TELAT_MASUK_BERAT/SANGAT_BERAT/SEDANG · PULANG_CEPAT_BERAT/SEDANG)
         </div>""", unsafe_allow_html=True)
     if 'approver_status' in df.columns:
         st.markdown("#### 📋 Status Approver")
@@ -719,7 +709,7 @@ def build_popup(row):
       <table style='width:100%;border-collapse:collapse'>
         <tr><td><b>Karyawan</b></td><td>{row.get('karyawan_id','')}</td></tr>
         <tr><td><b>SKPD</b></td><td>{row.get('id_skpd','')}</td></tr>
-        <tr><td><b>Jenis</b></td><td>{'🟢 Masuk' if row.get('jenis')=='M' else '🔴 Pulang'}</td></tr>
+        <tr><td><b>Jenis</b></td><td>{'📥 Masuk' if row.get('jenis')=='M' else '📤 Pulang'}</td></tr>
         <tr><td><b>Waktu</b></td><td>{str(row.get('tanggal_kirim',''))[:16]}</td></tr>
         <tr><td><b>Status</b></td><td>{e} <b style='color:{c}'>{s}</b></td></tr>
         <tr><td><b>Jarak</b></td><td>{d:.3f} km</td></tr>
@@ -764,8 +754,9 @@ def create_folium_map(df, map_type='marker', oc=None):
             if pd.notna(o.get('office_lat')):
                 folium.Marker([o['office_lat'],o['office_long']],
                     popup=f"SKPD {o['id_skpd']}", tooltip=f"Kantor SKPD {o['id_skpd']}",
-                    icon=folium.Icon(color='blue',icon='home',prefix='fa')).add_to(m)
-                folium.Circle([o['office_lat'],o['office_long']], radius=300,
+                    icon=folium.Icon(color='blue', icon='home', prefix='fa',
+                                     icon_size=(30, 30))).add_to(m)
+                folium.Circle([o['office_lat'],o['office_long']], radius=100,
                     color='#3498db', fill=True, fill_color='#3498db',
                     fill_opacity=0.05, weight=2, dash_array='6').add_to(m)
     return m
@@ -797,165 +788,295 @@ def page_visualisasi(filters):
     with tabs[5]: _vis_approver(df)
     with tabs[6]: _vis_data(df)
 
+# ============================================================
+# FIX: _vis_overview — pie & bar pakai category_orders lengkap
+#      + tabel ringkasan semua status (termasuk TELAT_MASUK_SANGAT_BERAT)
+# ============================================================
 def _vis_overview(df):
-    n=len(df); nb=df['is_bermasalah'].sum()
-    c1,c2,c3,c4 = st.columns(4)
-    with c1: st.metric("Total",          f"{n:,}")
-    with c2: st.metric("Karyawan",       f"{df['karyawan_id'].nunique():,}")
-    with c3: st.metric("🔴🟠 Indiscipline",f"{nb:,}")
-    with c4: st.metric("🟢🟡 OK",         f"{n-nb:,}")
-    cl,cr = st.columns(2)
+    n  = len(df)
+    nb = df['is_bermasalah'].sum()
+
+    c1, c2, c3, c4 = st.columns(4)
+    with c1: st.metric("Total",              f"{n:,}")
+    with c2: st.metric("Karyawan",           f"{df['karyawan_id'].nunique():,}")
+    with c3: st.metric("⛔🔴🟠 Indiscipline", f"{nb:,}")
+    with c4: st.metric("🟢🟡 OK",            f"{n - nb:,}")
+
+    cl, cr = st.columns(2)
     with cl:
         vc = df['status_presensi'].value_counts().reset_index()
-        vc.columns = ['status_presensi','count']
-        fig = px.pie(vc, values='count', names='status_presensi',
-                     title='Distribusi Status Presensi',
-                     color='status_presensi', color_discrete_map=STATUS_COLORS, hole=0.4)
-        fig.update_layout(height=400); st.plotly_chart(fig, use_container_width=True)
-    with cr:
-        skpd_s = df.groupby(['id_skpd','status_presensi']).size().reset_index(name='n')
-        fig = px.bar(skpd_s, x='id_skpd', y='n', color='status_presensi',
-                     title='Status per SKPD', barmode='stack',
-                     color_discrete_map=STATUS_COLORS,
-                     category_orders={'status_presensi':STATUS_ORDER})
-        
-        # Mengatur sumbu X jadi kategori dan sumbu Y agar menampilkan angka utuh (tanpa 'k')
-        fig.update_xaxes(type='category')
-        fig.update_layout(height=400, yaxis_tickformat="d") 
-        
+        vc.columns = ['status_presensi', 'count']
+        fig = px.pie(
+            vc, values='count', names='status_presensi',
+            title='Distribusi Status Presensi',
+            color='status_presensi',
+            color_discrete_map=STATUS_COLORS,
+            hole=0.4,
+            category_orders={'status_presensi': STATUS_ORDER},
+        )
+        fig.update_layout(height=420)
+        fig.update_traces(marker=dict(line=dict(color='white', width=1)))
         st.plotly_chart(fig, use_container_width=True)
-    cl2,cr2 = st.columns(2)
+
+    with cr:
+        skpd_s = df.groupby(['id_skpd', 'status_presensi']).size().reset_index(name='n')
+        fig = px.bar(
+            skpd_s, x='id_skpd', y='n', color='status_presensi',
+            title='Status per SKPD', barmode='stack',
+            color_discrete_map=STATUS_COLORS,
+            category_orders={'status_presensi': STATUS_ORDER},
+        )
+        fig.update_xaxes(type='category')
+        fig.update_layout(height=420, yaxis_tickformat="d")
+        st.plotly_chart(fig, use_container_width=True)
+
+    cl2, cr2 = st.columns(2)
     with cl2:
-        masuk = df[df['jenis']=='M']
+        masuk = df[df['jenis'] == 'M']
         if not masuk.empty:
             vm = masuk['status_presensi'].value_counts().reset_index()
-            vm.columns=['status_presensi','count']
-            fig = px.pie(vm, values='count', names='status_presensi', title='⬆️ Absensi Masuk',
-                         color='status_presensi', color_discrete_map=STATUS_COLORS, hole=0.4)
-            fig.update_layout(height=340,
-                legend=dict(itemsizing='constant',
-                            font=dict(size=12),
-                            bgcolor='rgba(0,0,0,0)'))
+            vm.columns = ['status_presensi', 'count']
+            fig = px.pie(
+                vm, values='count', names='status_presensi',
+                title='⬆️ Absensi Masuk',
+                color='status_presensi',
+                color_discrete_map=STATUS_COLORS,
+                hole=0.4,
+                category_orders={'status_presensi': STATUS_ORDER},
+            )
+            fig.update_layout(
+                height=360,
+                legend=dict(itemsizing='constant', font=dict(size=11), bgcolor='rgba(0,0,0,0)'),
+            )
             fig.update_traces(marker=dict(line=dict(color='white', width=1)))
             st.plotly_chart(fig, use_container_width=True)
+
     with cr2:
-        pulang = df[df['jenis']=='P']
+        pulang = df[df['jenis'] == 'P']
         if not pulang.empty:
             vp = pulang['status_presensi'].value_counts().reset_index()
-            vp.columns=['status_presensi','count']
-            fig = px.pie(vp, values='count', names='status_presensi', title='⬇️ Absensi Pulang',
-                         color='status_presensi', color_discrete_map=STATUS_COLORS, hole=0.4)
-            fig.update_layout(height=340,
-                legend=dict(itemsizing='constant',
-                            font=dict(size=12),
-                            bgcolor='rgba(0,0,0,0)'))
+            vp.columns = ['status_presensi', 'count']
+            fig = px.pie(
+                vp, values='count', names='status_presensi',
+                title='⬇️ Absensi Pulang',
+                color='status_presensi',
+                color_discrete_map=STATUS_COLORS,
+                hole=0.4,
+                category_orders={'status_presensi': STATUS_ORDER},
+            )
+            fig.update_layout(
+                height=360,
+                legend=dict(itemsizing='constant', font=dict(size=11), bgcolor='rgba(0,0,0,0)'),
+            )
             fig.update_traces(marker=dict(line=dict(color='white', width=1)))
             st.plotly_chart(fig, use_container_width=True)
+
+    # --- Tabel ringkasan semua status agar selalu tampil ---
+    st.markdown("#### 📋 Ringkasan Semua Status")
+    vc_all = df['status_presensi'].value_counts()
+    summary_rows = []
+    for s in STATUS_ORDER:
+        cnt = int(vc_all.get(s, 0))
+        summary_rows.append({
+            'Emoji':        status_emoji(s),
+            'Status':       s,
+            'Jumlah':       cnt,
+            'Persen':       f"{cnt / max(n, 1) * 100:.1f}%",
+            'Indiscipline': '⚠️ Ya' if s in STATUS_BERMASALAH else '',
+        })
+    st.dataframe(
+        pd.DataFrame(summary_rows),
+        use_container_width=True,
+        hide_index=True,
+    )
 
 def _vis_map(df, filters, oc):
     if df.empty: st.warning("Tidak ada data."); return
     if oc is None or (hasattr(oc,'__len__') and len(oc)==0):
         oc = build_office_centroid(df)
-    MAX=2000
-    dfd = df.sample(MAX, random_state=42) if len(df)>MAX else df
-    if len(df)>MAX: st.info(f"Menampilkan {MAX:,} dari {len(df):,} titik.")
+    MAX = 2000
+    total = len(df)
+    dfd = df.sample(MAX, random_state=42) if total > MAX else df
+    if total > MAX:
+        st.info(f"🗺️ Menampilkan **{MAX:,}** sampel acak dari **{total:,}** sebaran titik absensi. "
+                f"Untuk melihat semua titik, gunakan mode 🔥 Heatmap.")
     m = create_folium_map(dfd, filters.get('map_type','marker'), oc)
     st_folium(m, width=None, height=560, returned_objects=[])
-    st.markdown("🟢 **Masuk** — border tipis | ⚪ **Pulang** — border putih tebal | 🔵 Kantor SKPD")
 
+# ============================================================
+# FIX: _vis_temporal — category_orders lengkap di semua chart
+# ============================================================
 def _vis_temporal(df):
-    if 'jam' not in df.columns: st.warning("Kolom jam tidak ada."); return
-    cl,cr = st.columns(2)
+    if 'jam' not in df.columns:
+        st.warning("Kolom jam tidak ada.")
+        return
+
+    cl, cr = st.columns(2)
     with cl:
-        fig = px.bar(df.groupby(['jam','status_presensi']).size().reset_index(name='n'),
-                     x='jam', y='n', color='status_presensi', title='Status per Jam',
-                     color_discrete_map=STATUS_COLORS, category_orders={'status_presensi':STATUS_ORDER})
-        fig.update_layout(yaxis=dict(tickformat="d")) # Menghapus 'k' di Status per Jam
+        fig = px.bar(
+            df.groupby(['jam', 'status_presensi']).size().reset_index(name='n'),
+            x='jam', y='n', color='status_presensi',
+            title='Status per Jam',
+            color_discrete_map=STATUS_COLORS,
+            category_orders={'status_presensi': STATUS_ORDER},
+        )
         fig.update_layout(yaxis=dict(tickformat=",d"))
-        fig.add_vrect(x0=7,x1=9,fillcolor='green',opacity=0.07,annotation_text='Masuk')
-        fig.add_vrect(x0=15,x1=17,fillcolor='purple',opacity=0.07,annotation_text='Pulang')
+        fig.add_vrect(x0=7,  x1=9,  fillcolor='green',  opacity=0.07, annotation_text='Masuk')
+        fig.add_vrect(x0=15, x1=17, fillcolor='purple', opacity=0.07, annotation_text='Pulang')
         st.plotly_chart(fig, use_container_width=True)
+
     with cr:
         if 'weekday' in df.columns:
-            dm={0:'Senin',1:'Selasa',2:'Rabu',3:'Kamis',4:'Jumat',5:'Sabtu',6:'Minggu'}
-            d2=df.copy(); d2['hari']=d2['weekday'].map(dm)
-            fig=px.bar(d2.groupby(['hari','status_presensi']).size().reset_index(name='n'),
-                       x='hari',y='n',color='status_presensi',title='Status per Hari',
-                       color_discrete_map=STATUS_COLORS,
-                       category_orders={'hari':list(dm.values()),'status_presensi':STATUS_ORDER})
+            dm = {0:'Senin', 1:'Selasa', 2:'Rabu', 3:'Kamis', 4:'Jumat', 5:'Sabtu', 6:'Minggu'}
+            d2 = df.copy()
+            d2['hari'] = d2['weekday'].map(dm)
+            fig = px.bar(
+                d2.groupby(['hari', 'status_presensi']).size().reset_index(name='n'),
+                x='hari', y='n', color='status_presensi',
+                title='Status per Hari',
+                color_discrete_map=STATUS_COLORS,
+                category_orders={
+                    'hari': list(dm.values()),
+                    'status_presensi': STATUS_ORDER,
+                },
+            )
             st.plotly_chart(fig, use_container_width=True)
-    if 'tanggal' in df.columns:
-        daily=df.groupby(['tanggal','status_presensi']).size().reset_index(name='n')
-        fig=px.line(daily,x='tanggal',y='n',color='status_presensi',
-                    markers=True,title='Trend Harian',color_discrete_map=STATUS_COLORS)
-        fig.update_layout(height=320); st.plotly_chart(fig, use_container_width=True)
 
+    if 'tanggal' in df.columns:
+        daily = df.groupby(['tanggal', 'status_presensi']).size().reset_index(name='n')
+        fig = px.line(
+            daily, x='tanggal', y='n', color='status_presensi',
+            markers=True, title='Trend Harian',
+            color_discrete_map=STATUS_COLORS,
+            category_orders={'status_presensi': STATUS_ORDER},
+        )
+        fig.update_layout(height=320)
+        st.plotly_chart(fig, use_container_width=True)
+
+# ============================================================
+# FIX: _vis_distance — category_orders lengkap di histogram
+# ============================================================
 def _vis_distance(df):
-    if 'dist_km' not in df.columns: st.warning("Kolom dist_km tidak ada."); return
-    n_out=(df['dist_km']>0.3).sum()
-    n_far=df['very_far'].sum() if 'very_far' in df.columns else (df['dist_km']>5.0).sum()
-    c1,c2,c3,c4,c5=st.columns(5)
-    with c1: st.metric("Rata-rata",       f"{df['dist_km'].mean():.3f} km")
-    with c2: st.metric("Median",          f"{df['dist_km'].median():.3f} km")
-    with c3: st.metric("Maksimum",        f"{df['dist_km'].max():.3f} km")
-    with c4: st.metric("Di luar 300m",    f"{n_out:,} ({n_out/max(len(df),1)*100:.1f}%)")
-    with c5: st.metric("Sangat jauh >5km",f"{n_far:,}")
-    # Menghapus pembagian kolom (cl, cr) agar menjadi landscape/penuh
-    fig=px.histogram(df[df['dist_km']<=10], x='dist_km', color='status_presensi',
-                     title='Distribusi Jarak ≤10km', nbins=100, # nbins ditambah agar lebih detail di landscape
-                     color_discrete_map=STATUS_COLORS,
-                     category_orders={'status_presensi':STATUS_ORDER})
-    fig.update_layout(yaxis=dict(tickformat="d")) # Menghapus 'k' di Histogram Jarak
-    fig.add_vline(x=0.3, line_dash='dash', line_color='red', annotation_text='300m')
-    
-    # Update layout: Tinggi dikurangi sedikit (optional) agar pas di layar, 
-    # dan lebar otomatis mengikuti container (landscape)
-    fig.update_layout(height=450) 
+    if 'dist_km' not in df.columns:
+        st.warning("Kolom dist_km tidak ada.")
+        return
+
+    n_out = (df['dist_km'] > 0.1).sum()
+    n_far = df['very_far'].sum() if 'very_far' in df.columns else (df['dist_km'] > 5.0).sum()
+    c1,c2,c3,c4,c5 = st.columns(5)
+    with c1: st.metric("Rata-rata",        f"{df['dist_km'].mean():.3f} km")
+    with c2: st.metric("Median",           f"{df['dist_km'].median():.3f} km")
+    with c3: st.metric("Maksimum",         f"{df['dist_km'].max():.3f} km")
+    with c4: st.metric("Di luar 100m",     f"{n_out:,} ({n_out/max(len(df),1)*100:.1f}%)")
+    with c5: st.metric("Sangat jauh >5km", f"{n_far:,}")
+
+    df_plot = df.copy()
+    df_plot['dist_plot'] = df_plot['dist_km'].clip(upper=1.0)
+    n_over = (df['dist_km'] > 1.0).sum()
+    caption_text = ""
+    if n_over > 0:
+        caption_text = f"⚠️ {n_over:,} titik di luar 1km dikelompokkan ke bucket **'>1km'** (ujung kanan)"
+
+    fig = px.histogram(
+        df_plot, x='dist_plot', color='status_presensi',
+        title='Distribusi Jarak (zoom ≤ 1km, >1km dikelompokkan)',
+        nbins=100,
+        color_discrete_map=STATUS_COLORS,
+        category_orders={'status_presensi': STATUS_ORDER},
+        range_x=[0, 1.05],
+    )
+    fig.update_layout(yaxis=dict(tickformat="d"))
+    fig.add_vline(x=0.1, line_dash='dash', line_color='red',  annotation_text='100m')
+    fig.add_vline(x=1.0, line_dash='dot',  line_color='gray', annotation_text='>1km →')
+    fig.update_layout(height=450)
     st.plotly_chart(fig, use_container_width=True)
-    
-    # Bagian Distribusi Jarak per SKPD (Box Plot) sudah dihapus/tidak dipanggil lagi
-    cl2,cr2=st.columns(2)
+    if caption_text:
+        st.caption(caption_text)
+
+    cl2, cr2 = st.columns(2)
     with cl2:
-        zone=pd.DataFrame({'Zona':['Dalam 300m','Di luar 300m'],
-                           'Jumlah':[(df['dist_km']<=0.3).sum(),(df['dist_km']>0.3).sum()]})
-        fig=px.pie(zone,values='Jumlah',names='Zona',title='Proporsi Dalam vs Luar 300m',
-                   color='Zona',color_discrete_map={'Dalam 300m':'#27ae60','Di luar 300m':'#e74c3c'},hole=0.4)
+        zone = pd.DataFrame({
+            'Zona':   ['Dalam 100m', 'Di luar 100m'],
+            'Jumlah': [(df['dist_km'] <= 0.1).sum(), (df['dist_km'] > 0.1).sum()],
+        })
+        fig = px.pie(
+            zone, values='Jumlah', names='Zona',
+            title='Proporsi Dalam vs Luar 100m',
+            color='Zona',
+            color_discrete_map={'Dalam 100m': '#27ae60', 'Di luar 100m': '#e74c3c'},
+            hole=0.4,
+        )
         st.plotly_chart(fig, use_container_width=True)
     with cr2:
-        skpd_dist=(df[df['dist_km']<=10].groupby('id_skpd')['dist_km']
-                   .median().reset_index().sort_values('dist_km',ascending=False))
-        fig=px.bar(skpd_dist,x='id_skpd',y='dist_km',title='Median Jarak per SKPD',
-                   color='dist_km',color_continuous_scale='Blues_r')
-        fig.add_hline(y=0.3,line_dash='dash',line_color='red',annotation_text='300m')
-        fig.update_xaxes(type='category'); fig.update_layout(coloraxis_showscale=False)
+        skpd_dist = (
+            df[df['dist_km'] <= 10]
+            .groupby('id_skpd')['dist_km']
+            .mean().reset_index()
+            .sort_values('dist_km', ascending=False)
+        )
+        fig = px.bar(
+            skpd_dist, x='id_skpd', y='dist_km',
+            title='Rata-rata Jarak per SKPD',
+            color='dist_km', color_continuous_scale='Blues_r',
+        )
+        fig.add_hline(y=0.1, line_dash='dash', line_color='red', annotation_text='100m')
+        fig.update_xaxes(type='category')
+        fig.update_layout(coloraxis_showscale=False)
         st.plotly_chart(fig, use_container_width=True)
 
+# ============================================================
+# FIX: _vis_employee — _ensure_all_status_cols agar
+#      TELAT_MASUK_SANGAT_BERAT tidak hilang dari bar chart
+# ============================================================
 def _vis_employee(df):
-    pivot=df.groupby(['karyawan_id','status_presensi']).size().unstack(fill_value=0)
-    pivot['total']=pivot.sum(axis=1)
-    pivot['indiscipline_n']=sum(pivot.get(s,0) for s in STATUS_BERMASALAH)
-    pivot['indiscipline_pct']=(pivot['indiscipline_n']/pivot['total']*100).round(1)
-    pivot['skpd']=df.groupby('karyawan_id')['id_skpd'].first()
-    pivot=pivot.reset_index().sort_values('indiscipline_n',ascending=False)
-    cl,cr=st.columns(2)
+    pivot = df.groupby(['karyawan_id', 'status_presensi']).size().unstack(fill_value=0)
+
+    # KUNCI FIX: pastikan semua kolom STATUS_BERMASALAH & STATUS_ORDER ada
+    pivot = _ensure_all_status_cols(pivot, STATUS_BERMASALAH)
+    pivot = _ensure_all_status_cols(pivot, STATUS_ORDER)
+
+    pivot['total']            = pivot.sum(axis=1)
+    pivot['indiscipline_n']   = sum(pivot[s] for s in STATUS_BERMASALAH)
+    pivot['indiscipline_pct'] = (pivot['indiscipline_n'] / pivot['total'] * 100).round(1)
+    pivot['skpd']             = df.groupby('karyawan_id')['id_skpd'].first()
+    pivot = pivot.reset_index().sort_values('indiscipline_n', ascending=False)
+
+    cl, cr = st.columns(2)
     with cl:
-        top=pivot.nlargest(15,'indiscipline_n')
-        berm_cols=[s for s in STATUS_BERMASALAH if s in top.columns]
-        if berm_cols:
-            fig=px.bar(top,x='karyawan_id',y=berm_cols,title='Top 15 Indiscipline',
-                       color_discrete_map=STATUS_COLORS,barmode='stack')
-            fig.update_layout(yaxis=dict(tickformat="d")) # Menghapus 'k' di Ranking Karyawan
-            fig.update_xaxes(type='category'); st.plotly_chart(fig, use_container_width=True)
-    with cr:
-        fig=px.scatter(pivot,x='total',y='indiscipline_pct',size='indiscipline_n',
-                       color='indiscipline_pct',hover_data=['karyawan_id','skpd'],
-                       title='Total vs % Indiscipline',color_continuous_scale='RdYlGn_r')
+        top = pivot.nlargest(15, 'indiscipline_n')
+        # Urut sesuai STATUS_ORDER, ambil hanya yang masuk STATUS_BERMASALAH
+        berm_cols = [s for s in STATUS_ORDER if s in STATUS_BERMASALAH]
+        fig = px.bar(
+            top, x='karyawan_id', y=berm_cols,
+            title='Top 15 Indiscipline (semua kategori)',
+            color_discrete_map=STATUS_COLORS,
+            barmode='stack',
+            labels={'value': 'Jumlah', 'variable': 'Status'},
+            category_orders={'variable': berm_cols},
+        )
+        fig.update_layout(yaxis=dict(tickformat="d"))
+        fig.update_xaxes(type='category')
         st.plotly_chart(fig, use_container_width=True)
-    risky=pivot[pivot['indiscipline_n']>0]
+
+    with cr:
+        fig = px.scatter(
+            pivot, x='total', y='indiscipline_pct',
+            size='indiscipline_n',
+            color='indiscipline_pct',
+            hover_data=['karyawan_id', 'skpd'],
+            title='Total vs % Indiscipline',
+            color_continuous_scale='RdYlGn_r',
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    risky = pivot[pivot['indiscipline_n'] > 0]
     if len(risky):
         st.markdown("### 🚨 Karyawan Indiscipline")
-        show_cols=['karyawan_id','skpd','total','indiscipline_n','indiscipline_pct']+\
-                  [s for s in STATUS_ORDER if s in risky.columns]
+        status_cols_show = [s for s in STATUS_ORDER if s in risky.columns and risky[s].sum() > 0]
+        show_cols = (
+            ['karyawan_id', 'skpd', 'total', 'indiscipline_n', 'indiscipline_pct']
+            + status_cols_show
+        )
         st.dataframe(risky[show_cols].head(30), use_container_width=True)
 
 def _vis_approver(df):
@@ -985,11 +1106,7 @@ def _vis_approver(df):
             fig = px.bar(
                 agg, x='Status', y='Jumlah', color='Status',
                 title='Jumlah per Keputusan Approver',
-                color_discrete_map={
-                    'TERIMA':  '#27ae60',
-                    'TOLAK':   '#e74c3c',
-                    'PENDING': '#95a5a6',
-                },
+                color_discrete_map={'TERIMA':'#27ae60','TOLAK':'#e74c3c','PENDING':'#95a5a6'},
                 text='Jumlah',
             )
             fig.update_traces(textposition='outside')
@@ -1001,16 +1118,11 @@ def _vis_approver(df):
                 agg, values='Jumlah', names='Status',
                 title='Proporsi Keputusan Approver',
                 color='Status',
-                color_discrete_map={
-                    'TERIMA':  '#27ae60',
-                    'TOLAK':   '#e74c3c',
-                    'PENDING': '#95a5a6',
-                },
+                color_discrete_map={'TERIMA':'#27ae60','TOLAK':'#e74c3c','PENDING':'#95a5a6'},
                 hole=0.45,
             )
             fig.update_layout(height=380)
             st.plotly_chart(fig, use_container_width=True)
-
 
 def _vis_data(df):
     c1,c2=st.columns(2)
@@ -1052,9 +1164,9 @@ def page_hunting():
         <span>📊 <b>{n:,}</b></span>{' '.join(parts)}
         <span>👤 <b>{df['karyawan_id'].nunique():,}</b></span>
     </div>""", unsafe_allow_html=True)
-    t1, t2 = st.tabs(["🕵️ By Pegawai", "🏢 By SKPD"]) 
+    t1, t2 = st.tabs(["🕵️ By Pegawai", "🏢 By SKPD"])
     with t1: _hunt_pegawai(df, oc)
-    with t2: _hunt_skpd(df, oc) # Sekarang _hunt_skpd ada di t2 tab utama
+    with t2: _hunt_skpd(df, oc)
 
 def _hunt_pegawai(df, oc):
     st.markdown("""<div class="section-header"><span style="font-size:1.5rem">🕵️</span>
@@ -1064,20 +1176,11 @@ def _hunt_pegawai(df, oc):
     if 'watchlist' not in st.session_state:
         st.session_state['watchlist'] = []
     ids=sorted(df['karyawan_id'].unique().tolist())
-    cs,cb=st.columns([4,1])
-    with cs:
-        sel=st.selectbox("🔎 Pilih Pegawai", ids,
-            format_func=lambda x:(
-                f"ID {x} | SKPD {df[df['karyawan_id']==x]['id_skpd'].iloc[0] if len(df[df['karyawan_id']==x]) else '-'}"
-                f" | Indiscipline: {df[df['karyawan_id']==x]['is_bermasalah'].sum()}"),
-            key='hp_id')
-    with cb:
-        st.markdown("<br>", unsafe_allow_html=True)
-        in_wl=sel in st.session_state['watchlist']
-        if st.button("📌 Watch" if not in_wl else "❌ Unwatch", use_container_width=True):
-            if in_wl: st.session_state['watchlist'].remove(sel)
-            else: st.session_state['watchlist'].append(sel)
-            st.rerun()
+    sel=st.selectbox("🔎 Pilih Pegawai", ids,
+    format_func=lambda x:(
+        f"ID {x} | SKPD {df[df['karyawan_id']==x]['id_skpd'].iloc[0] if len(df[df['karyawan_id']==x]) else '-'}"
+        f" | Indiscipline: {df[df['karyawan_id']==x]['is_bermasalah'].sum()}"),
+    key='hp_id')
     de_full=df[df['karyawan_id']==sel].sort_values('tanggal_kirim')
     if de_full.empty: st.warning("Tidak ada data."); return
     mn_p=pd.to_datetime(de_full['tanggal_kirim'].min()).date()
@@ -1109,8 +1212,9 @@ def _hunt_pegawai(df, oc):
             fig=px.scatter(dp,x='tanggal',y='jam_desimal',
                            color='status_presensi',symbol='jenis',size='ukuran',
                            color_discrete_map=STATUS_COLORS,
+                           category_orders={'status_presensi': STATUS_ORDER},
                            title=f'Timeline — ID {sel}', hover_data=hover)
-            fig.add_hline(y=7.5,line_dash='dot',line_color='#3498db',annotation_text='07:30')
+            fig.add_hline(y=8.25,line_dash='dot',line_color='#3498db',annotation_text='08:15')
             fig.add_hline(y=16.0,line_dash='dot',line_color='#9b59b6',annotation_text='16:00')
             fig.update_layout(height=420, plot_bgcolor='#fafafa')
             st.plotly_chart(fig, use_container_width=True)
@@ -1125,7 +1229,7 @@ def _hunt_pegawai(df, oc):
             fc=status_folium_color(row.get('status_presensi',''))
             berm=is_bermasalah(row.get('status_presensi',''))
             popup=(f"<div style='font-size:12px'><b>#{i+1} — {str(row.get('tanggal_kirim',''))[:16]}</b>"
-                   f"<br>{'🟢 Masuk' if row.get('jenis')=='M' else '🔴 Pulang'}"
+                   f"<br>{'📥 Masuk' if row.get('jenis')=='M' else '📤 Pulang'}"
                    f"<br>Status: <b>{row.get('status_presensi','')}</b>"
                    f"<br>Jarak: {row.get('dist_km',0):.3f} km</div>")
             folium.CircleMarker([row['lat'],row['long']], radius=11 if berm else 7,
@@ -1137,7 +1241,7 @@ def _hunt_pegawai(df, oc):
                 o=off.iloc[0]
                 folium.Marker([o['office_lat'],o['office_long']], popup=f"Kantor {skpd_e}",
                     icon=folium.Icon(color='blue',icon='home',prefix='fa')).add_to(mp)
-                folium.Circle([o['office_lat'],o['office_long']],radius=300,
+                folium.Circle([o['office_lat'],o['office_long']],radius=100,
                     color='#3498db',fill=False,weight=2,dash_array='5').add_to(mp)
         st_folium(mp, width=None, height=500, returned_objects=[])
     with t3:
@@ -1184,6 +1288,9 @@ def _hunt_pegawai(df, oc):
         st.download_button(f"⬇️ ID {sel}",de[cols].to_csv(index=False).encode(),
                            f"karyawan_{sel}.csv","text/csv")
 
+# ============================================================
+# FIX: _hunt_skpd — _ensure_all_status_cols + berm_cols lengkap
+# ============================================================
 def _hunt_skpd(df, oc):
     st.markdown("""<div class="section-header"><span style="font-size:1.5rem">🏢</span>
         <div><div style="font-size:1.1rem;font-weight:700;color:#2c3e50">Hunt by SKPD</div></div>
@@ -1207,16 +1314,19 @@ def _hunt_skpd(df, oc):
         <div class="metric-card mc-red"><div class="metric-val">{nb:,}</div><div class="metric-lbl">Indiscipline</div></div>
         <div class="metric-card"><div class="metric-val">{nb/max(len(ds),1)*100:.1f}%</div><div class="metric-lbl">%</div></div>
     </div>""", unsafe_allow_html=True)
-    t1, t3, t4 = st.tabs(["🏆 Top Indicipline", "📅 Trend", "📋 Approver"])
+    t1, t3, t4 = st.tabs(["🏆 Top Indiscipline", "📅 Trend", "📋 Approver"])
     with t1:
-        pv=ds.groupby(['karyawan_id','status_presensi']).size().unstack(fill_value=0)
-        pv['total']=pv.sum(axis=1)
-        pv['indiscipline_n']=sum(pv.get(s,0) for s in STATUS_BERMASALAH)
-        pv['pct']=(pv['indiscipline_n']/pv['total']*100).round(1)
-        pv=pv.reset_index().sort_values('indiscipline_n',ascending=False)
-        top3=pv.head(3); medals=['⚠️','⚠️','⚠️']
-        cols3=st.columns(3)
-        for i,(_,row) in enumerate(top3.iterrows()):
+        pv = ds.groupby(['karyawan_id', 'status_presensi']).size().unstack(fill_value=0)
+        # KUNCI FIX: pastikan semua STATUS_BERMASALAH ada di pivot
+        pv = _ensure_all_status_cols(pv, STATUS_BERMASALAH)
+        pv['total']          = pv.sum(axis=1)
+        pv['indiscipline_n'] = sum(pv[s] for s in STATUS_BERMASALAH)
+        pv['pct']            = (pv['indiscipline_n'] / pv['total'] * 100).round(1)
+        pv = pv.reset_index().sort_values('indiscipline_n', ascending=False)
+        top3 = pv.head(3)
+        medals = ['⚠️', '⚠️', '⚠️']
+        cols3 = st.columns(3)
+        for i, (_, row) in enumerate(top3.iterrows()):
             with cols3[i]:
                 st.markdown(f"""<div class='metric-card mc-red' style='text-align:center'>
                     <div style='font-size:2rem'>{medals[i]}</div>
@@ -1224,32 +1334,30 @@ def _hunt_skpd(df, oc):
                     <div class='metric-lbl'>{int(row['indiscipline_n'])} indiscipline</div>
                     <div class='metric-lbl'>{row['pct']:.1f}% dari {int(row['total'])} absensi</div>
                 </div>""", unsafe_allow_html=True)
-        berm_cols=[s for s in STATUS_BERMASALAH if s in top3.columns]
-        if berm_cols:
-            fig=px.bar(top3,x='karyawan_id',y=berm_cols,
-                       title=f'Top 3 Indiscipline — SKPD {sel_s}',
-                       color_discrete_map=STATUS_COLORS,barmode='stack')
-            fig.update_xaxes(type='category'); fig.update_layout(height=320)
-            st.plotly_chart(fig, use_container_width=True)
-    # with t2:
-    #     mp=folium.Map(location=[ds['lat'].median(),ds['long'].median()],
-    #                   zoom_start=13,tiles='CartoDB positron')
-    #     HeatMap([[r['lat'],r['long'],1+r.get('is_bermasalah',0)*3] for _,r in ds.iterrows()],
-    #             radius=18,blur=12,gradient={'0.0':'green','0.5':'yellow','1.0':'red'}).add_to(mp)
-    #     if not oc.empty:
-    #         off=oc[oc['id_skpd']==sel_s]
-    #         if not off.empty:
-    #             o=off.iloc[0]
-    #             folium.Marker([o['office_lat'],o['office_long']],popup=f"Kantor {sel_s}",
-    #                 icon=folium.Icon(color='blue',icon='home',prefix='fa')).add_to(mp)
-    #     st_folium(mp, width=None, height=500, returned_objects=[])
+        # Urut sesuai STATUS_ORDER, semua STATUS_BERMASALAH pasti ada karena sudah di-ensure
+        berm_cols = [s for s in STATUS_ORDER if s in STATUS_BERMASALAH]
+        fig = px.bar(
+            top3, x='karyawan_id', y=berm_cols,
+            title=f'Top 3 Indiscipline — SKPD {sel_s}',
+            color_discrete_map=STATUS_COLORS,
+            barmode='stack',
+            labels={'value': 'Jumlah', 'variable': 'Status'},
+            category_orders={'variable': berm_cols},
+        )
+        fig.update_xaxes(type='category')
+        fig.update_layout(height=320)
+        st.plotly_chart(fig, use_container_width=True)
     with t3:
         if 'tanggal' in ds.columns:
             daily=ds.groupby(['tanggal','status_presensi']).size().reset_index(name='n')
-            fig=px.area(daily,x='tanggal',y='n',color='status_presensi',title='Trend',
-                        color_discrete_map=STATUS_COLORS,
-                        category_orders={'status_presensi':STATUS_ORDER})
-            fig.update_layout(height=380); st.plotly_chart(fig, use_container_width=True)
+            fig=px.area(
+                daily, x='tanggal', y='n', color='status_presensi',
+                title='Trend',
+                color_discrete_map=STATUS_COLORS,
+                category_orders={'status_presensi': STATUS_ORDER},
+            )
+            fig.update_layout(height=380)
+            st.plotly_chart(fig, use_container_width=True)
     with t4:
         if 'approver_status' not in ds.columns:
             st.info("Kolom approver_status tidak ada.")
@@ -1269,7 +1377,7 @@ def _hunt_skpd(df, oc):
                 st.plotly_chart(fig, use_container_width=True)
 
 # ============================================================
-# PREPROCESSING (DINONAKTIFKAN)
+# PREPROCESSING
 # ============================================================
 def _run_preprocessing(df_raw: pd.DataFrame, config: dict):
     df = df_raw.copy()
@@ -1291,19 +1399,23 @@ def _run_preprocessing(df_raw: pd.DataFrame, config: dict):
     if 'pulang_pre_dt' in df.columns:
         df.loc[mask_p,'menit_cepat'] = ((df.loc[mask_p,'pulang_pre_dt']-df.loc[mask_p,'tanggal_kirim']).dt.total_seconds()/60).round(2)
     df['durasi_menit'] = df['menit_telat'].fillna(df['menit_cepat'])
+
     def classify_masuk(m):
         if pd.isna(m): return 'UNKNOWN'
-        if m<=0: return 'TWM'
-        if m<=14: return 'T2'
-        if m<=44: return 'T3'
+        if m <= 0:  return 'TWM'
+        if m <= 30: return 'T1'
+        if m <= 60: return 'T2'
+        if m <= 90: return 'T3'
         return 'T4'
+
     def classify_pulang(m):
         if pd.isna(m): return 'UNKNOWN'
-        if m<=0: return 'TWP'
-        if m<=30: return 'PC1'
-        if m<=60: return 'PC2'
-        if m<=90: return 'PC3'
+        if m <= 0:  return 'TWP'
+        if m <= 30: return 'PC1'
+        if m <= 60: return 'PC2'
+        if m <= 90: return 'PC3'
         return 'PC4'
+
     df['status_presensi_calc'] = pd.Series(dtype=object)
     df.loc[mask_m,'status_presensi_calc'] = df.loc[mask_m,'menit_telat'].apply(classify_masuk).values
     df.loc[mask_p,'status_presensi_calc'] = df.loc[mask_p,'menit_cepat'].apply(classify_pulang).values
@@ -1365,14 +1477,14 @@ def _run_preprocessing(df_raw: pd.DataFrame, config: dict):
         a=np.sin((np.radians(lat2)-np.radians(lat1))/2)**2+np.cos(np.radians(lat1))*np.cos(np.radians(lat2))*np.sin((np.radians(lon2)-np.radians(lon1))/2)**2
         return R*2*np.arcsin(np.sqrt(a))
     df['dist_km']=hav(df['lat'].values,df['long'].values,df['office_lat'].values,df['office_long'].values)
-    df['outside_300m']=(df['dist_km']>0.3).astype(int); df['very_far']=(df['dist_km']>5.0).astype(int)
+    df['outside_100m']=(df['dist_km']>0.1).astype(int); df['very_far']=(df['dist_km']>5.0).astype(int)
     df['extreme_far']=(df['dist_km']>50.0).astype(int)
-    log(f"✅ STEP 6: Haversine — {df['outside_300m'].sum():,} di luar 300m")
+    log(f"✅ STEP 6: Haversine — {df['outside_100m'].sum():,} di luar 100m")
     df['no_note']=df['catatan'].isna().astype(int) if 'catatan' in df.columns else 0
-    df['far_no_note']=((df['outside_300m']==1)&(df['no_note']==1)).astype(int)
-    df['far_with_note']=((df['outside_300m']==1)&(df['no_note']==0)).astype(int)
-    df['near_but_status0']=((df['outside_300m']==0)&(df['status_lokasi']==0)).astype(int) if 'status_lokasi' in df.columns else 0
-    df['far_but_status1']=((df['outside_300m']==1)&(df['status_lokasi']==1)).astype(int) if 'status_lokasi' in df.columns else 0
+    df['far_no_note']=((df['outside_100m']==1)&(df['no_note']==1)).astype(int)
+    df['far_with_note']=((df['outside_100m']==1)&(df['no_note']==0)).astype(int)
+    df['near_but_status0']=((df['outside_100m']==0)&(df['status_lokasi']==0)).astype(int) if 'status_lokasi' in df.columns else 0
+    df['far_but_status1']=((df['outside_100m']==1)&(df['status_lokasi']==1)).astype(int) if 'status_lokasi' in df.columns else 0
     log(f"✅ STEP 7: Validation flags")
     if not config.get('run_stdbscan',True) or not SKLEARN_OK:
         for c in ['st_cluster_masuk','st_cluster_pulang','is_st_noise_masuk','is_st_noise_pulang']: df[c]=0
@@ -1395,7 +1507,7 @@ def _run_preprocessing(df_raw: pd.DataFrame, config: dict):
         df['is_st_noise_pulang']=(df['st_cluster_pulang']==-1).astype(int)
         log(f"✅ STEP 8: ST-DBSCAN")
     sc=pd.Series(0,index=df.index)
-    for col,w in [('extreme_far',3),('very_far',2),('far_no_note',2),('outside_300m',1),
+    for col,w in [('extreme_far',3),('very_far',2),('far_no_note',2),('outside_100m',1),
                   ('is_noise_masuk',1),('is_st_noise_masuk',1),('far_but_status1',1)]:
         sc+=df.get(col,pd.Series(0,index=df.index))*w
     sc-=df.get('far_with_note',pd.Series(0,index=df.index))*1
@@ -1407,7 +1519,7 @@ def _run_preprocessing(df_raw: pd.DataFrame, config: dict):
                'lat','long','status_lokasi','catatan','approver_status','status_presensi',
                'jam','menit','jam_desimal','weekday','timestamp_num',
                'lat_rad','long_rad','office_lat','office_long','dist_km',
-               'outside_300m','very_far','extreme_far',
+               'outside_100m','very_far','extreme_far',
                'no_note','far_no_note','far_with_note','near_but_status0','far_but_status1',
                'cluster_masuk','cluster_pulang','is_noise_masuk','is_noise_pulang',
                'cluster_size_masuk','cluster_size_pulang',
@@ -1504,24 +1616,24 @@ def page_preprocessing():
 # MAIN
 # ============================================================
 def main():
-    for key,default in [('df',None),('office_centroid',pd.DataFrame()),('watchlist',[])]:
+    for key,default in [('df',None),('office_centroid',pd.DataFrame())]:
         if key not in st.session_state: st.session_state[key] = default
 
     page, filters = render_sidebar()
 
     pages = {
-        "🏠 Beranda":     page_beranda,
-        "📥 Upload Data": page_upload,
-        "📊 Visualisasi": lambda: page_visualisasi(filters),
-        "🎯 Hunting":     page_hunting,
-        # "🔧 Preprocessing": page_preprocessing,  # ← UNCOMMENT untuk aktifkan kembali
+        "🏠 Beranda":       page_beranda,
+        "📥 Upload Data":   page_upload,
+        "📊 Visualisasi":   lambda: page_visualisasi(filters),
+        "🎯 Hunting":       page_hunting,
+        "🔧 Preprocessing": page_preprocessing,
     }
     pages.get(page, page_beranda)()
 
     st.markdown("---")
     st.markdown(
         '<p style="text-align:center;color:gray;font-size:11px">'
-        'Analisis Absensi v3 — T2/T3/T4/TWM/TWP/PC1-4 | Streamlit + Folium + Plotly'
+        'Analisis Absensi v3 — T1/T2/T3/T4/TWM/TWP/PC1-4 | Streamlit + Folium + Plotly'
         '</p>', unsafe_allow_html=True)
 
 if __name__ == '__main__':
