@@ -1,6 +1,10 @@
 """
 Visualisasi & Analisis Absensi v3
+<<<<<<< HEAD
+Status Presensi: T2/T3/T4/TWM/TWP/PC1-4 dari kolom status_presensi
+=======
 Status Presensi: T1/T2/T3/T4/TWM/TWP/PC1-4 dari kolom status_presensi
+>>>>>>> 8f17e85501ec97f6967c4166aa28eaa31a607949
 
 PREPROCESSING: saat ini DINONAKTIFKAN dari navigasi.
 Untuk mengaktifkan kembali, cari komentar "AKTIFKAN PREPROCESSING" dan ikuti petunjuknya.
@@ -411,8 +415,13 @@ def render_sidebar():
     st.sidebar.markdown("## 🗺️ Analisis Absensi")
     st.sidebar.markdown("---")
 
+<<<<<<< HEAD
+    nav_pages = ["🏠 Beranda", "📥 Upload Data", "📊 Visualisasi", "🎯 Hunting"]
+=======
     nav_pages = ["🏠 Beranda", "📥 Upload Data", "📊 Visualisasi", "🎯 Hunting", "🔧 Preprocessing"]
+>>>>>>> 8f17e85501ec97f6967c4166aa28eaa31a607949
 
+    # Baca nav_target, lalu langsung hapus agar tidak nyangkut
     forced = st.session_state.get('_nav_target')
     if forced and forced in nav_pages:
         default_idx = nav_pages.index(forced)
@@ -460,6 +469,23 @@ def render_sidebar():
                                                'cluster':'🔵 Cluster',
                                                'heatmap':'🔥 Heatmap'}[x])
 
+<<<<<<< HEAD
+        wl = st.session_state.get('watchlist', [])
+        if wl:
+            st.sidebar.markdown("---")
+            st.sidebar.markdown("### 👁️ Watchlist")
+            for eid in wl:
+                ed = df[df['karyawan_id']==eid]
+                nb = ed['is_bermasalah'].sum() if not ed.empty else 0
+                st.sidebar.markdown(f"""<div class='watchlist-item'>
+                    <span>🔴</span><span><b>ID {eid}</b> — {nb} indiscipline</span>
+                </div>""", unsafe_allow_html=True)
+            if st.sidebar.button("🗑️ Clear Watchlist"):
+                st.session_state['watchlist'] = []
+                st.rerun()
+
+=======
+>>>>>>> 8f17e85501ec97f6967c4166aa28eaa31a607949
     st.sidebar.markdown("---")
     if st.sidebar.button("🗑️ Clear Cache", help="Hapus semua cache — pakai jika ganti dataset atau data terasa tidak update"):
         st.cache_data.clear()
@@ -473,15 +499,29 @@ def render_sidebar():
 # ============================================================
 # BERANDA
 # ============================================================
+# ============================================================
+# BERANDA (OPTIMIZED FOR STREAMLIT 1.56.0)
+# ============================================================
+# ============================================================
+# BERANDA (V1.56.0 - PASTEL PALETTE)
+# ============================================================
 def page_beranda():
     st.markdown('<div class="main-header">🗺️ Analisis Absensi Pegawai</div>', unsafe_allow_html=True)
     st.markdown('<p class="sub-header">Upload data → status otomatis terpetakan dari kode mesin</p>',
                 unsafe_allow_html=True)
 
+<<<<<<< HEAD
+    # CSS KHUSUS VERSI 1.56.0 DENGAN WARNA PASTEL CUSTOM
+=======
+>>>>>>> 8f17e85501ec97f6967c4166aa28eaa31a607949
     st.markdown(f"""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800;900&display=swap');
 
+<<<<<<< HEAD
+    /* Selector Utama untuk Button di dalam Column */
+=======
+>>>>>>> 8f17e85501ec97f6967c4166aa28eaa31a607949
     div[data-testid="stColumn"] button {{
         min-height: 220px !important;
         border-radius: 20px !important;
@@ -499,24 +539,56 @@ def page_beranda():
         border: 1px solid rgba(0,0,0,0.05) !important;
     }}
 
+<<<<<<< HEAD
+    /* Card 1 — Soft Blue (#e8f2ff) */
+=======
+>>>>>>> 8f17e85501ec97f6967c4166aa28eaa31a607949
     div[data-testid="stColumn"]:nth-of-type(1) button {{
         background: #e8f2ff !important;
         color: #2b5a9a !important;
         box-shadow: 0 4px 15px rgba(0,0,0,0.03) !important;
     }}
 
+<<<<<<< HEAD
+    /* Card 2 — Soft Green (#e8f9ee) */
+=======
+>>>>>>> 8f17e85501ec97f6967c4166aa28eaa31a607949
     div[data-testid="stColumn"]:nth-of-type(2) button {{
         background: #e8f9ee !important;
         color: #2d6a4f !important;
         box-shadow: 0 4px 15px rgba(0,0,0,0.03) !important;
     }}
 
+<<<<<<< HEAD
+    /* Card 3 — Soft Yellow (#ffffe7) */
+=======
+>>>>>>> 8f17e85501ec97f6967c4166aa28eaa31a607949
     div[data-testid="stColumn"]:nth-of-type(3) button {{
         background: #ffffe7 !important;
         color: #7a6a00 !important;
         box-shadow: 0 4px 15px rgba(0,0,0,0.03) !important;
     }}
 
+<<<<<<< HEAD
+    /* Hover Effects - Sedikit lebih gelap saat di-hover agar interaktif */
+    div[data-testid="stColumn"]:nth-of-type(1) button:hover {{ 
+        transform: translateY(-5px); 
+        background: #d4e8ff !important; 
+        box-shadow: 0 12px 25px rgba(43,90,154,0.12) !important;
+    }}
+    div[data-testid="stColumn"]:nth-of-type(2) button:hover {{ 
+        transform: translateY(-5px); 
+        background: #d4f2dc !important; 
+        box-shadow: 0 12px 25px rgba(45,106,79,0.1) !important;
+    }}
+    div[data-testid="stColumn"]:nth-of-type(3) button:hover {{ 
+        transform: translateY(-5px); 
+        background: #fdfdbb !important; 
+        box-shadow: 0 12px 25px rgba(122,106,0,0.08) !important;
+    }}
+
+    /* Meratakan teks ke kiri untuk Markdown di dalam Button */
+=======
     div[data-testid="stColumn"]:nth-of-type(1) button:hover {{
         transform: translateY(-5px);
         background: #d4e8ff !important;
@@ -533,6 +605,7 @@ def page_beranda():
         box-shadow: 0 12px 25px rgba(122,106,0,0.08) !important;
     }}
 
+>>>>>>> 8f17e85501ec97f6967c4166aa28eaa31a607949
     div[data-testid="stColumn"] button div[data-testid="stMarkdownContainer"] p {{
         text-align: left !important;
         margin: 0 !important;
@@ -567,7 +640,11 @@ def page_beranda():
             st.rerun()
 
     st.markdown("---")
+<<<<<<< HEAD
+    # Sisa kode tabel mapping kamu (st.dataframe) bisa dilanjutkan di sini
+=======
 
+>>>>>>> 8f17e85501ec97f6967c4166aa28eaa31a607949
     st.markdown("### 📋 Mapping Kode → Label (dari kolom `status_presensi`)")
 
     st.markdown("**MASUK** — jam masuk normal: **08:15** | interval telat: **30 menit**")
@@ -581,6 +658,15 @@ def page_beranda():
 
     st.markdown("**PULANG** — diukur dari `pulang_pre_time`:")
     st.dataframe(pd.DataFrame([
+<<<<<<< HEAD
+        ['TWP','TEPAT_WAKTU_PULANG (Shift 1)', '🟢','≤ 0 menit',   'Pulang jam 16:35, minimum 16:30 → aman'],
+        ['TWP','TEPAT_WAKTU_PULANG (Shift 2)', '🟢','≤ 0 menit',   'Pulang jam 17:00, minimum 17:00 → aman'],
+        ['PC1','PULANG_CEPAT',       '🟡','0–30 menit',  'Pulang jam 16:20 → 10 mnt terlalu cepat'],
+        ['PC2','PULANG_CEPAT_RINGAN','🟡','30–60 menit', 'Pulang jam 15:45 → 45 mnt terlalu cepat'],
+        ['PC3','PULANG_CEPAT_SEDANG','🟠','60–90 menit', 'Pulang jam 15:10 → 80 mnt terlalu cepat'],
+        ['PC4','PULANG_CEPAT_BERAT', '🔴','> 90 menit',  'Pulang jam 13:00 → 210 mnt terlalu cepat'],
+    ], columns=['Kode','Label','','Durasi Pulang Cepat','Contoh']), use_container_width=True, hide_index=True)
+=======
         ['TWP', 'TEPAT_WAKTU_PULANG (Shift 1)', '🟢', '≥ 16:30', 'Pulang jam 16:35 → tepat waktu'],
         ['TWP', 'TEPAT_WAKTU_PULANG (Shift 2)', '🟢', '≥ 17:00', 'Pulang jam 17:00 → tepat waktu'],
         ['PC1', 'PULANG_CEPAT',                 '🟡', '16:00 – 16:29', 'Pulang jam 16:20 → 10 mnt terlalu cepat'],
@@ -589,6 +675,7 @@ def page_beranda():
         ['PC4', 'PULANG_CEPAT_BERAT',            '🔴', '< 15:00',       'Pulang jam 13:00 → 210 mnt terlalu cepat'],
     ], columns=['Kode','Label','','Rentang Jam','Contoh']), use_container_width=True, hide_index=True)
 
+>>>>>>> 8f17e85501ec97f6967c4166aa28eaa31a607949
     st.markdown("### 📋 Kolom yang Dibutuhkan")
     st.dataframe(pd.DataFrame([
         ['karyawan_id',    'integer',  'ID pegawai',                   'Wajib'],
@@ -835,6 +922,17 @@ def _vis_overview(df):
         masuk = df[df['jenis'] == 'M']
         if not masuk.empty:
             vm = masuk['status_presensi'].value_counts().reset_index()
+<<<<<<< HEAD
+            vm.columns=['status_presensi','count']
+            fig = px.pie(vm, values='count', names='status_presensi', title='⬆️ Absensi Masuk',
+                         color='status_presensi', color_discrete_map=STATUS_COLORS, hole=0.4)
+            fig.update_layout(height=340,
+                legend=dict(itemsizing='constant',
+                            font=dict(size=12),
+                            bgcolor='rgba(0,0,0,0)'))
+            fig.update_traces(marker=dict(line=dict(color='white', width=1)))
+            st.plotly_chart(fig, use_container_width=True)
+=======
             vm.columns = ['status_presensi', 'count']
             fig = px.pie(
                 vm, values='count', names='status_presensi',
@@ -851,10 +949,22 @@ def _vis_overview(df):
             fig.update_traces(marker=dict(line=dict(color='white', width=1)))
             st.plotly_chart(fig, use_container_width=True)
 
+>>>>>>> 8f17e85501ec97f6967c4166aa28eaa31a607949
     with cr2:
         pulang = df[df['jenis'] == 'P']
         if not pulang.empty:
             vp = pulang['status_presensi'].value_counts().reset_index()
+<<<<<<< HEAD
+            vp.columns=['status_presensi','count']
+            fig = px.pie(vp, values='count', names='status_presensi', title='⬇️ Absensi Pulang',
+                         color='status_presensi', color_discrete_map=STATUS_COLORS, hole=0.4)
+            fig.update_layout(height=340,
+                legend=dict(itemsizing='constant',
+                            font=dict(size=12),
+                            bgcolor='rgba(0,0,0,0)'))
+            fig.update_traces(marker=dict(line=dict(color='white', width=1)))
+            st.plotly_chart(fig, use_container_width=True)
+=======
             vp.columns = ['status_presensi', 'count']
             fig = px.pie(
                 vp, values='count', names='status_presensi',
@@ -889,6 +999,7 @@ def _vis_overview(df):
         use_container_width=True,
         hide_index=True,
     )
+>>>>>>> 8f17e85501ec97f6967c4166aa28eaa31a607949
 
 def _vis_map(df, filters, oc):
     if df.empty: st.warning("Tidak ada data."); return
@@ -1123,6 +1234,10 @@ def _vis_approver(df):
             )
             fig.update_layout(height=380)
             st.plotly_chart(fig, use_container_width=True)
+<<<<<<< HEAD
+
+=======
+>>>>>>> 8f17e85501ec97f6967c4166aa28eaa31a607949
 
 def _vis_data(df):
     c1,c2=st.columns(2)
@@ -1164,9 +1279,13 @@ def page_hunting():
         <span>📊 <b>{n:,}</b></span>{' '.join(parts)}
         <span>👤 <b>{df['karyawan_id'].nunique():,}</b></span>
     </div>""", unsafe_allow_html=True)
+<<<<<<< HEAD
+    t1, t2 = st.tabs(["🕵️ By Pegawai", "🏢 By SKPD"]) 
+=======
     t1, t2 = st.tabs(["🕵️ By Pegawai", "🏢 By SKPD"])
+>>>>>>> 8f17e85501ec97f6967c4166aa28eaa31a607949
     with t1: _hunt_pegawai(df, oc)
-    with t2: _hunt_skpd(df, oc)
+    with t2: _hunt_skpd(df, oc) # Sekarang _hunt_skpd ada di t2 tab utama
 
 def _hunt_pegawai(df, oc):
     st.markdown("""<div class="section-header"><span style="font-size:1.5rem">🕵️</span>
@@ -1314,6 +1433,18 @@ def _hunt_skpd(df, oc):
         <div class="metric-card mc-red"><div class="metric-val">{nb:,}</div><div class="metric-lbl">Indiscipline</div></div>
         <div class="metric-card"><div class="metric-val">{nb/max(len(ds),1)*100:.1f}%</div><div class="metric-lbl">%</div></div>
     </div>""", unsafe_allow_html=True)
+<<<<<<< HEAD
+    t1, t3, t4 = st.tabs(["🏆 Top Indicipline", "📅 Trend", "📋 Approver"])
+    with t1:
+        pv=ds.groupby(['karyawan_id','status_presensi']).size().unstack(fill_value=0)
+        pv['total']=pv.sum(axis=1)
+        pv['indiscipline_n']=sum(pv.get(s,0) for s in STATUS_BERMASALAH)
+        pv['pct']=(pv['indiscipline_n']/pv['total']*100).round(1)
+        pv=pv.reset_index().sort_values('indiscipline_n',ascending=False)
+        top3=pv.head(3); medals=['⚠️','⚠️','⚠️']
+        cols3=st.columns(3)
+        for i,(_,row) in enumerate(top3.iterrows()):
+=======
     t1, t3, t4 = st.tabs(["🏆 Top Indiscipline", "📅 Trend", "📋 Approver"])
     with t1:
         pv = ds.groupby(['karyawan_id', 'status_presensi']).size().unstack(fill_value=0)
@@ -1327,6 +1458,7 @@ def _hunt_skpd(df, oc):
         medals = ['⚠️', '⚠️', '⚠️']
         cols3 = st.columns(3)
         for i, (_, row) in enumerate(top3.iterrows()):
+>>>>>>> 8f17e85501ec97f6967c4166aa28eaa31a607949
             with cols3[i]:
                 st.markdown(f"""<div class='metric-card mc-red' style='text-align:center'>
                     <div style='font-size:2rem'>{medals[i]}</div>
@@ -1334,6 +1466,27 @@ def _hunt_skpd(df, oc):
                     <div class='metric-lbl'>{int(row['indiscipline_n'])} indiscipline</div>
                     <div class='metric-lbl'>{row['pct']:.1f}% dari {int(row['total'])} absensi</div>
                 </div>""", unsafe_allow_html=True)
+<<<<<<< HEAD
+        berm_cols=[s for s in STATUS_BERMASALAH if s in top3.columns]
+        if berm_cols:
+            fig=px.bar(top3,x='karyawan_id',y=berm_cols,
+                       title=f'Top 3 Indiscipline — SKPD {sel_s}',
+                       color_discrete_map=STATUS_COLORS,barmode='stack')
+            fig.update_xaxes(type='category'); fig.update_layout(height=320)
+            st.plotly_chart(fig, use_container_width=True)
+    # with t2:
+    #     mp=folium.Map(location=[ds['lat'].median(),ds['long'].median()],
+    #                   zoom_start=13,tiles='CartoDB positron')
+    #     HeatMap([[r['lat'],r['long'],1+r.get('is_bermasalah',0)*3] for _,r in ds.iterrows()],
+    #             radius=18,blur=12,gradient={'0.0':'green','0.5':'yellow','1.0':'red'}).add_to(mp)
+    #     if not oc.empty:
+    #         off=oc[oc['id_skpd']==sel_s]
+    #         if not off.empty:
+    #             o=off.iloc[0]
+    #             folium.Marker([o['office_lat'],o['office_long']],popup=f"Kantor {sel_s}",
+    #                 icon=folium.Icon(color='blue',icon='home',prefix='fa')).add_to(mp)
+    #     st_folium(mp, width=None, height=500, returned_objects=[])
+=======
         # Urut sesuai STATUS_ORDER, semua STATUS_BERMASALAH pasti ada karena sudah di-ensure
         berm_cols = [s for s in STATUS_ORDER if s in STATUS_BERMASALAH]
         fig = px.bar(
@@ -1347,6 +1500,7 @@ def _hunt_skpd(df, oc):
         fig.update_xaxes(type='category')
         fig.update_layout(height=320)
         st.plotly_chart(fig, use_container_width=True)
+>>>>>>> 8f17e85501ec97f6967c4166aa28eaa31a607949
     with t3:
         if 'tanggal' in ds.columns:
             daily=ds.groupby(['tanggal','status_presensi']).size().reset_index(name='n')
