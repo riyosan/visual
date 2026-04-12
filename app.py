@@ -359,6 +359,21 @@ def load_processed_file(file_bytes, file_name):
     else:
         df['is_tolak'] = df['is_terima'] = df['is_pending'] = 0
 
+    # === KODE BARU: AUTO-GENERATE DIST_KM JIKA TIDAK ADA ===
+    if 'dist_km' not in df.columns and 'lat' in df.columns and 'long' in df.columns and 'id_skpd' in df.columns:
+        if 'office_lat' not in df.columns or 'office_long' not in df.columns:
+            m_data = df[df['jenis'] == 'M'] if 'jenis' in df.columns and (df['jenis'] == 'M').any() else df
+            oc = m_data.groupby('id_skpd').agg(office_lat=('lat','median'), office_long=('long','median')).reset_index()
+            df = pd.merge(df, oc, on='id_skpd', how='left')
+            remaps.append("📍 office_lat/long dibuat otomatis dari titik tengah (median) absensi.")
+        
+        # Hitung jarak menggunakan Haversine
+        rlat1 = np.radians(df['lat'].fillna(0).values);   rlat2 = np.radians(df['office_lat'].fillna(0).values)
+        rlon1 = np.radians(df['long'].fillna(0).values);  rlon2 = np.radians(df['office_long'].fillna(0).values)
+        a = np.sin((rlat2-rlat1)/2)**2 + np.cos(rlat1)*np.cos(rlat2)*np.sin((rlon2-rlon1)/2)**2
+        df['dist_km'] = 6371.0 * 2 * np.arcsin(np.sqrt(np.clip(a,0,1)))
+        remaps.append("📏 Kolom 'dist_km' (Jarak) dihitung otomatis dari koordinat GPS menggunakan formula Haversine.")
+        
     if 'dist_km' in df.columns and 'lat' in df.columns and 'office_lat' in df.columns:
         median_dist = df['dist_km'].median()
         if median_dist > 100:
@@ -367,9 +382,8 @@ def load_processed_file(file_bytes, file_name):
             a = np.sin((rlat2-rlat1)/2)**2 + np.cos(rlat1)*np.cos(rlat2)*np.sin((rlon2-rlon1)/2)**2
             df['dist_km'] = 6371.0 * 2 * np.arcsin(np.sqrt(np.clip(a,0,1)))
             remaps.append(f"🔧 dist_km dihitung ulang dari koordinat (median lama={median_dist:.0f})")
-        df['outside_100m'] = (df['dist_km'] > 0.1).astype(int)
-        df['very_far']     = (df['dist_km'] > 5.0).astype(int)
-    elif 'dist_km' in df.columns:
+            
+    if 'dist_km' in df.columns:
         df['outside_100m'] = (df['dist_km'] > 0.1).astype(int)
         df['very_far']     = (df['dist_km'] > 5.0).astype(int)
 
@@ -451,24 +465,22 @@ def load_local_file(filepath):
 # ============================================================
 # SIDEBAR
 # ============================================================
+# ============================================================
+# SIDEBAR
+# ============================================================
 def render_sidebar():
     st.sidebar.markdown("## 🗺️ Analisis Absensi")
     st.sidebar.markdown("---")
 
-    # nav_pages = ["🏠 Beranda", "📥 Upload Data", "📊 Visualisasi", "🎯 Hunting"]
-    nav_pages = ["🏠 Beranda", "📥 Upload Data", "📊 Visualisasi", "🎯 Hunting"
-    # , "🔧 Preprocessing"
-    ]
+    nav_pages = ["🏠 Beranda", "📥 Upload Data", "📊 Visualisasi", "🎯 Hunting", "🔧 Preprocessing"]
 
-    forced = st.session_state.get('_nav_target')
-    if forced and forced in nav_pages:
-        default_idx = nav_pages.index(forced)
-        st.session_state.pop('_nav_target', None)
-    else:
-        st.session_state.pop('_nav_target', None)
-        default_idx = 0
+    # Sinkronisasi pindah halaman dari klik tombol (misal dari Beranda) dengan state sidebar
+    if '_nav_target' in st.session_state and st.session_state['_nav_target'] in nav_pages:
+        st.session_state['nav_radio_key'] = st.session_state['_nav_target']
+        del st.session_state['_nav_target'] # Hapus setelah dipakai agar tidak nyangkut
 
-    page = st.sidebar.radio("📌 Navigasi", nav_pages, index=default_idx)
+    # Render radio navigasi menggunakan key agar posisinya terkunci (tidak gampang ke-reset)
+    page = st.sidebar.radio("📌 Navigasi", nav_pages, key='nav_radio_key')
     st.sidebar.markdown("---")
 
     uploaded = None
