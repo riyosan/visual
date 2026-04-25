@@ -1576,19 +1576,32 @@ def page_preprocessing():
         st.dataframe(fe_info, use_container_width=True, hide_index=True)
 
     # ── Konfigurasi ─────────────────────────────────────────────
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        run_dbscan   = st.checkbox("🔵 DBSCAN",             value=True)
-        run_stdbscan = st.checkbox("🟣 ST-DBSCAN",          value=True)
-        recalc       = st.checkbox("🔄 Hitung ulang status", value=False,
-                                   help="Abaikan status_presensi asli, hitung ulang dari jam_desimal")
-    with c2:
-        eps_km   = st.number_input("DBSCAN radius (km)",    value=0.1, step=0.05, format="%.2f")
-        min_smp  = st.number_input("DBSCAN min_samples",    value=3,   step=1)
-        st_eps_km = st.number_input("ST-DBSCAN radius (km)", value=0.1, step=0.05, format="%.2f")
-    with c3:
-        st_eps_hr  = st.number_input("ST-DBSCAN radius (jam)", value=1.0, step=0.5, format="%.1f")
-        st_min_smp = st.number_input("ST-DBSCAN min_samples",  value=3,   step=1)
+    # c1, c2, c3 = st.columns(3)
+    # with c1:
+    #     run_dbscan   = st.checkbox("🔵 DBSCAN",             value=True)
+    #     run_stdbscan = st.checkbox("🟣 ST-DBSCAN",          value=True)
+    #     recalc       = st.checkbox("🔄 Hitung ulang status", value=False,
+    #                                help="Abaikan status_presensi asli, hitung ulang dari jam_desimal")
+    # with c2:
+    #     eps_km   = st.number_input("DBSCAN radius (km)",    value=0.1, step=0.05, format="%.2f")
+    #     min_smp  = st.number_input("DBSCAN min_samples",    value=3,   step=1)
+    #     st_eps_km = st.number_input("ST-DBSCAN radius (km)", value=0.1, step=0.05, format="%.2f")
+    # with c3:
+    #     st_eps_hr  = st.number_input("ST-DBSCAN radius (jam)", value=1.0, step=0.5, format="%.1f")
+    #     st_min_smp = st.number_input("ST-DBSCAN min_samples",  value=3,   step=1)
+
+   # ── Konfigurasi (UI Dihilangkan & Fitur Dinonaktifkan) ──────
+    # Kita set False agar tidak diproses di latar belakang
+    run_dbscan   = False
+    run_stdbscan = False
+    recalc       = False # Set True jika ingin tetap hitung ulang status dari jam
+    
+    # Nilai default (tidak akan terpakai karena run_dbscan = False)
+    eps_km      = 0.1
+    min_smp     = 3
+    st_eps_km   = 0.1
+    st_eps_hr   = 1.0
+    st_min_smp  = 3
 
     config = {
         'run_dbscan':     run_dbscan,
