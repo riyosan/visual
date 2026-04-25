@@ -218,15 +218,13 @@ def _ensure_all_status_cols(df_pivot, status_list):
 
 # ============================================================
 # OFFICE MARKER — DivIcon
-# Ubah OFFICE_ICON_SIZE untuk resize (default: 20px)
 # ============================================================
-OFFICE_ICON_SIZE = 20  # ← ganti angka ini untuk memperbesar/memperkecil
+OFFICE_ICON_SIZE = 20
 
 def make_office_icon(skpd_id):
-    """Buat DivIcon kotak kecil berlabel 🏢 untuk marker kantor SKPD."""
     s    = OFFICE_ICON_SIZE
     half = s // 2
-    fs   = max(s - 6, 10)   # font-size emoji
+    fs   = max(s - 6, 10)
     return folium.DivIcon(
         html=f"""<div style="
             width:{s}px; height:{s}px;
@@ -243,7 +241,6 @@ def make_office_icon(skpd_id):
     )
 
 def _add_office_markers(m, oc):
-    """Tambahkan semua marker kantor SKPD ke peta menggunakan DivIcon."""
     if oc is None or (hasattr(oc, '__len__') and len(oc) == 0):
         return
     for _, o in oc.iterrows():
@@ -359,7 +356,6 @@ def load_processed_file(file_bytes, file_name):
     else:
         df['is_tolak'] = df['is_terima'] = df['is_pending'] = 0
 
-    # === KODE BARU: AUTO-GENERATE DIST_KM JIKA TIDAK ADA ===
     if 'dist_km' not in df.columns and 'lat' in df.columns and 'long' in df.columns and 'id_skpd' in df.columns:
         if 'office_lat' not in df.columns or 'office_long' not in df.columns:
             m_data = df[df['jenis'] == 'M'] if 'jenis' in df.columns and (df['jenis'] == 'M').any() else df
@@ -367,7 +363,6 @@ def load_processed_file(file_bytes, file_name):
             df = pd.merge(df, oc, on='id_skpd', how='left')
             remaps.append("📍 office_lat/long dibuat otomatis dari titik tengah (median) absensi.")
         
-        # Hitung jarak menggunakan Haversine
         rlat1 = np.radians(df['lat'].fillna(0).values);   rlat2 = np.radians(df['office_lat'].fillna(0).values)
         rlon1 = np.radians(df['long'].fillna(0).values);  rlon2 = np.radians(df['office_long'].fillna(0).values)
         a = np.sin((rlat2-rlat1)/2)**2 + np.cos(rlat1)*np.cos(rlat2)*np.sin((rlon2-rlon1)/2)**2
@@ -465,21 +460,16 @@ def load_local_file(filepath):
 # ============================================================
 # SIDEBAR
 # ============================================================
-# ============================================================
-# SIDEBAR
-# ============================================================
 def render_sidebar():
     st.sidebar.markdown("## 🗺️ Analisis Absensi")
     st.sidebar.markdown("---")
 
     nav_pages = ["🏠 Beranda", "📥 Upload Data", "📊 Visualisasi", "🎯 Hunting", "🔧 Preprocessing"]
 
-    # Sinkronisasi pindah halaman dari klik tombol (misal dari Beranda) dengan state sidebar
     if '_nav_target' in st.session_state and st.session_state['_nav_target'] in nav_pages:
         st.session_state['nav_radio_key'] = st.session_state['_nav_target']
-        del st.session_state['_nav_target'] # Hapus setelah dipakai agar tidak nyangkut
+        del st.session_state['_nav_target']
 
-    # Render radio navigasi menggunakan key agar posisinya terkunci (tidak gampang ke-reset)
     page = st.sidebar.radio("📌 Navigasi", nav_pages, key='nav_radio_key')
     st.sidebar.markdown("---")
 
@@ -534,7 +524,7 @@ def render_sidebar():
                 st.rerun()
 
     st.sidebar.markdown("---")
-    if st.sidebar.button("🗑️ Clear Cache", help="Hapus semua cache — pakai jika ganti dataset atau data terasa tidak update"):
+    if st.sidebar.button("🗑️ Clear Cache", help="Hapus semua cache"):
         st.cache_data.clear()
         for k in ['_loaded_df','_loaded_fc','_loaded_rem','_loaded_src',
                   '_autoloaded','_autoload_attempted','_file_hash']:
@@ -588,9 +578,6 @@ def page_beranda():
     div[data-testid="stColumn"]:nth-of-type(3) button:hover {{
         transform: translateY(-5px); background: #fdfdbb !important;
         box-shadow: 0 12px 25px rgba(122,106,0,0.08) !important;
-    }}
-    div[data-testid="stColumn"] button div[data-testid="stMarkdownContainer"] p {{
-        text-align: left !important; margin: 0 !important;
     }}
     </style>
     """, unsafe_allow_html=True)
@@ -863,7 +850,7 @@ def _vis_map(df, filters, oc):
     MAX = 1000; total = len(df)
     dfd = df.sample(MAX, random_state=42) if total > MAX else df
     if total > MAX:
-        st.info(f"🗺️ Menampilkan **{MAX:,}** sampel acak dari **{total:,}** titik. Gunakan 🔥 Heatmap untuk semua titik.")
+        st.info(f"🗺️ Menampilkan **{MAX:,}** sampel acak dari **{total:,}** titik.")
     m = create_folium_map(dfd, filters.get('map_type','marker'), oc)
     st_folium(m, width=None, height=560, returned_objects=[])
 
@@ -893,63 +880,6 @@ def _vis_temporal(df):
             color_discrete_map=STATUS_COLORS, category_orders={'status_presensi': STATUS_ORDER})
         fig.update_layout(height=320); st.plotly_chart(fig, use_container_width=True)
 
-# def _vis_distance(df):
-#     if 'dist_km' not in df.columns: st.warning("Kolom dist_km tidak ada."); return
-#     n_out = (df['dist_km'] > 0.1).sum()
-#     n_far = df['very_far'].sum() if 'very_far' in df.columns else (df['dist_km'] > 5.0).sum()
-    
-#     c1,c2,c3,c4,c5 = st.columns(5)
-#     with c1: st.metric("Rata-rata",        f"{df['dist_km'].mean():.3f} km")
-#     with c2: st.metric("Median",           f"{df['dist_km'].median():.3f} km")
-#     with c3: st.metric("Maksimum",         f"{df['dist_km'].max():.3f} km")
-#     with c4: st.metric("Di luar 100m",     f"{n_out:,} ({n_out/max(len(df),1)*100:.1f}%)")
-#     with c5: st.metric("Sangat jauh >5km", f"{n_far:,}")
-    
-#     # === KODE BARU: BAGAN KELOMPOK JARAK ===
-#     df_plot = df.copy()
-    
-#     # 1. Tentukan batas kelompok dalam Kilometer (km)
-#     bins = [-1, 0.05, 0.1, 1.0, 2.0, float('inf')]
-#     labels = ['0 - 50m', '51m - 100m', '101m - 1km', '1.01km - 2km', '> 2km']
-    
-#     # 2. Buat kolom kategori baru menggunakan pandas cut
-#     df_plot['kategori_jarak'] = pd.cut(df_plot['dist_km'], bins=bins, labels=labels)
-    
-#     # 3. Agregasi data agar count yang kecil tetap solid
-#     df_agg = df_plot.groupby(['kategori_jarak', 'status_presensi'], observed=False).size().reset_index(name='jumlah')
-#     df_agg = df_agg[df_agg['jumlah'] > 0] # Filter yang kosong agar grafik bersih
-    
-#     # 4. Gambar menggunakan px.bar
-#     fig = px.bar(df_agg, x='kategori_jarak', y='jumlah', color='status_presensi',
-#                  title='Distribusi Jarak Absensi (Dikelompokkan)',
-#                  text='jumlah', # Menampilkan angka di bagan
-#                  color_discrete_map=STATUS_COLORS,
-#                  category_orders={'status_presensi': STATUS_ORDER, 'kategori_jarak': labels})
-    
-#     fig.update_traces(textposition='outside') # Angka count ada di atas batang
-#     fig.update_layout(yaxis=dict(tickformat="d"), 
-#                       xaxis_title="Kelompok Jarak", 
-#                       yaxis_title="Jumlah Absensi",
-#                       height=450)
-                      
-#     st.plotly_chart(fig, use_container_width=True)
-#     # === AKHIR KODE BARU ===
-    
-#     cl2, cr2 = st.columns(2)
-#     with cl2:
-#         zone = pd.DataFrame({'Zona':['Dalam 100m','Di luar 100m'],
-#             'Jumlah':[(df['dist_km']<=0.1).sum(),(df['dist_km']>0.1).sum()]})
-#         fig = px.pie(zone, values='Jumlah', names='Zona', title='Proporsi Dalam vs Luar 100m',
-#             color='Zona', color_discrete_map={'Dalam 100m':'#27ae60','Di luar 100m':'#e74c3c'}, hole=0.4)
-#         st.plotly_chart(fig, use_container_width=True)
-#     with cr2:
-#         skpd_dist = (df[df['dist_km']<=10].groupby('id_skpd')['dist_km']
-#             .mean().reset_index().sort_values('dist_km', ascending=False))
-#         fig = px.bar(skpd_dist, x='id_skpd', y='dist_km', title='Rata-rata Jarak per SKPD',
-#             color='dist_km', color_continuous_scale='Blues_r')
-#         fig.add_hline(y=0.1, line_dash='dash', line_color='red', annotation_text='100m')
-#         fig.update_xaxes(type='category'); fig.update_layout(coloraxis_showscale=False)
-#         st.plotly_chart(fig, use_container_width=True)
 def _vis_distance(df):
     if 'dist_km' not in df.columns: st.warning("Kolom dist_km tidak ada."); return
     n_out = (df['dist_km'] > 0.1).sum()
@@ -965,23 +895,18 @@ def _vis_distance(df):
     df_plot = df.copy(); df_plot['dist_plot'] = df_plot['dist_km'].clip(upper=1.0)
     n_over = (df['dist_km'] >= 1.0).sum()
     
-    # === TITLE DAN SUBTITLE DISESUAIKAN ===
     fig = px.histogram(df_plot, x='dist_plot', color='status_presensi',
-        title='<b>Distribusi Jarak</b><br><span style="font-size: 14px; font-weight: normal;">(zoom ≤ 1km) dikelompokkan</span>', 
-        nbins=100,
-        log_y=True, 
+        title='<b>Distribusi Jarak</b><br><span style="font-size: 14px; font-weight: normal;">(zoom ≤ 1km)</span>', 
+        nbins=100, log_y=True, 
         color_discrete_map=STATUS_COLORS, category_orders={'status_presensi': STATUS_ORDER}, range_x=[0,1.05])
-    
     fig.update_layout(yaxis=dict(tickformat="d"))
-    
-    # === PEMBATAS 50m, 100m, dan >1km ===
     fig.add_vline(x=0.05, line_dash='dash', line_color='orange', annotation_text='50m')
     fig.add_vline(x=0.1, line_dash='dash', line_color='red', annotation_text='100m')
     fig.add_vline(x=1.0, line_dash='dot', line_color='gray', annotation_text='>1km →')
     fig.update_layout(height=450); st.plotly_chart(fig, use_container_width=True)
     
-    if n_over > 0:
-        st.caption(f"⚠️ {n_over:,} titik di luar 1km dikelompokkan ke bucket '>1km' (ujung kanan)")
+    if n_over >= 0:
+        st.caption(f"⚠️ {n_over:,} titik di luar 1km dikelompokkan ke bucket '>1km'")
         
     cl2, cr2 = st.columns(2)
     with cl2:
@@ -998,7 +923,6 @@ def _vis_distance(df):
         fig.add_hline(y=0.1, line_dash='dash', line_color='red', annotation_text='100m')
         fig.update_xaxes(type='category'); fig.update_layout(coloraxis_showscale=False)
         st.plotly_chart(fig, use_container_width=True)
-    
 
 def _vis_employee(df):
     pivot = df.groupby(['karyawan_id','status_presensi']).size().unstack(fill_value=0)
@@ -1048,7 +972,7 @@ def _vis_approver(df):
                 title='Jumlah per Keputusan Approver', text='Jumlah',
                 color_discrete_map={'TERIMA':'#27ae60','TOLAK':'#e74c3c','PENDING':'#95a5a6'})
             fig.update_traces(textposition='outside')
-            fig.update_layout(height=380, showlegend=False, xaxis_title='', yaxis_title='Jumlah Absensi')
+            fig.update_layout(height=380, showlegend=False)
             st.plotly_chart(fig, use_container_width=True)
         with cr:
             fig = px.pie(agg, values='Jumlah', names='Status', title='Proporsi Keputusan Approver',
@@ -1161,7 +1085,6 @@ def _hunt_pegawai(df, oc):
             folium.CircleMarker([row['lat'],row['long']], radius=11 if berm else 7,
                 color=fc, fill=True, fill_color=fc, fill_opacity=0.8,
                 popup=folium.Popup(popup, max_width=230)).add_to(mp)
-        # DivIcon untuk marker kantor di jejak pegawai
         if not oc.empty:
             off = oc[oc['id_skpd']==skpd_e]
             if not off.empty:
@@ -1281,117 +1204,322 @@ def _hunt_skpd(df, oc):
                 st.plotly_chart(fig, use_container_width=True)
 
 # ============================================================
-# FUNGSI PREPROCESSING & MACHINE LEARNING
+# PREPROCESSING — FEATURE ENGINEERING LENGKAP
 # ============================================================
-def _run_preprocessing(df_raw, config):
-    logs = []
-    df = df_raw.copy()
+def _engineer_all_features(df, config, logs):
+    """
+    Menambahkan SEMUA kolom feature engineering ke dataframe.
+    Kolom-kolom ini akan ikut tersimpan ke file output (CSV/Excel).
+    """
 
-    # Pastikan format tanggal valid
+    # ── A. Fitur Waktu ─────────────────────────────────────────
     if 'tanggal_kirim' in df.columns:
         df['tanggal_kirim'] = pd.to_datetime(df['tanggal_kirim'], errors='coerce')
-        df['tanggal'] = df['tanggal_kirim'].dt.date
-    
-    # Hapus baris yang tanggal, ID, atau jenisnya kosong (rusak)
+
+        # Jam, menit, detik
+        df['fe_jam']         = df['tanggal_kirim'].dt.hour
+        df['fe_menit']       = df['tanggal_kirim'].dt.minute
+        df['fe_detik']       = df['tanggal_kirim'].dt.second
+        df['fe_jam_desimal'] = df['fe_jam'] + df['fe_menit'] / 60.0 + df['fe_detik'] / 3600.0
+
+        # Hari & tanggal
+        df['fe_tanggal']     = df['tanggal_kirim'].dt.date
+        df['fe_weekday_num'] = df['tanggal_kirim'].dt.weekday   # 0=Senin … 6=Minggu
+        _day_map = {0:'Senin',1:'Selasa',2:'Rabu',3:'Kamis',4:'Jumat',5:'Sabtu',6:'Minggu'}
+        df['fe_nama_hari']   = df['fe_weekday_num'].map(_day_map)
+        df['fe_minggu_ke']   = df['tanggal_kirim'].dt.isocalendar().week.astype(int)
+        df['fe_bulan']       = df['tanggal_kirim'].dt.month
+        df['fe_tahun']       = df['tanggal_kirim'].dt.year
+        df['fe_kuartal']     = df['tanggal_kirim'].dt.quarter
+        df['fe_is_weekend']  = (df['fe_weekday_num'] >= 5).astype(int)
+
+        logs.append("⏰ Fitur waktu: fe_jam, fe_menit, fe_detik, fe_jam_desimal, fe_tanggal, "
+                    "fe_weekday_num, fe_nama_hari, fe_minggu_ke, fe_bulan, fe_tahun, fe_kuartal, fe_is_weekend")
+
+    # ── B. Mapping Status Presensi ──────────────────────────────
+    if 'status_presensi' in df.columns:
+        df['fe_status_mapped'] = df['status_presensi'].apply(map_status_value)
+    elif 'fe_jam_desimal' in df.columns and 'jenis' in df.columns:
+        df['fe_status_mapped'] = df.apply(
+            lambda r: determine_status_from_jam(r['fe_jam_desimal'], r['jenis']), axis=1)
+    else:
+        df['fe_status_mapped'] = 'UNKNOWN'
+
+    # Recalc status jika diminta
+    if config.get('recalc_status') and 'fe_jam_desimal' in df.columns and 'jenis' in df.columns:
+        df['fe_status_mapped'] = df.apply(
+            lambda r: determine_status_from_jam(r['fe_jam_desimal'], r['jenis']), axis=1)
+        logs.append("🔄 fe_status_mapped: dihitung ulang dari jam_desimal (recalc aktif)")
+    else:
+        logs.append("🏷️ fe_status_mapped: hasil mapping kode mesin → label deskriptif")
+
+    # Flag indisipliner
+    df['fe_is_bermasalah'] = df['fe_status_mapped'].apply(
+        lambda s: 1 if s in STATUS_BERMASALAH else 0)
+
+    # Kategori status (numerik untuk ML)
+    _status_num = {s: i for i, s in enumerate(STATUS_ORDER)}
+    df['fe_status_num'] = df['fe_status_mapped'].map(_status_num).fillna(-1).astype(int)
+
+    logs.append("🏷️ Fitur status: fe_status_mapped, fe_is_bermasalah, fe_status_num")
+
+    # ── C. Fitur Keterlambatan (menit) ─────────────────────────
+    if 'fe_jam_desimal' in df.columns and 'jenis' in df.columns:
+        JAM_MASUK_BATAS  = 8.25   # 08:15
+        JAM_PULANG_BATAS = 16.0   # 16:00
+
+        def hitung_menit_telat(row):
+            if row['jenis'] == 'M':
+                delta = (row['fe_jam_desimal'] - JAM_MASUK_BATAS) * 60
+                return max(round(delta, 1), 0)
+            return 0
+
+        def hitung_menit_pulang_cepat(row):
+            if row['jenis'] == 'P':
+                delta = (JAM_PULANG_BATAS - row['fe_jam_desimal']) * 60
+                return max(round(delta, 1), 0)
+            return 0
+
+        df['fe_menit_telat']        = df.apply(hitung_menit_telat, axis=1)
+        df['fe_menit_pulang_cepat'] = df.apply(hitung_menit_pulang_cepat, axis=1)
+        logs.append("⏱️ Fitur deviasi: fe_menit_telat, fe_menit_pulang_cepat (dalam menit)")
+
+    # ── D. Fitur Geospasial (Jarak Haversine) ──────────────────
+    if 'lat' in df.columns and 'long' in df.columns and 'id_skpd' in df.columns:
+        # Buat koordinat kantor jika belum ada
+        if 'office_lat' not in df.columns or 'office_long' not in df.columns:
+            src = df[df['jenis'] == 'M'] if 'jenis' in df.columns and (df['jenis'] == 'M').any() else df
+            oc_tmp = src.groupby('id_skpd').agg(
+                office_lat=('lat', 'median'),
+                office_long=('long', 'median')
+            ).reset_index()
+            df = pd.merge(df, oc_tmp, on='id_skpd', how='left')
+            logs.append("📍 office_lat/long dibuat dari median koordinat absensi MASUK per SKPD")
+
+        # Hitung jarak Haversine (vektorisasi NumPy)
+        rlat1 = np.radians(df['lat'].fillna(0).values)
+        rlat2 = np.radians(df['office_lat'].fillna(0).values)
+        rlon1 = np.radians(df['long'].fillna(0).values)
+        rlon2 = np.radians(df['office_long'].fillna(0).values)
+        a = (np.sin((rlat2 - rlat1) / 2) ** 2
+             + np.cos(rlat1) * np.cos(rlat2) * np.sin((rlon2 - rlon1) / 2) ** 2)
+        df['fe_dist_km']  = 6371.0 * 2 * np.arcsin(np.sqrt(np.clip(a, 0, 1)))
+        df['fe_dist_m']   = df['fe_dist_km'] * 1000   # meter
+
+        # Flag zona jarak
+        df['fe_dalam_100m']    = (df['fe_dist_km'] <= 0.1).astype(int)
+        df['fe_outside_100m']  = (df['fe_dist_km'] >  0.1).astype(int)
+        df['fe_outside_500m']  = (df['fe_dist_km'] >  0.5).astype(int)
+        df['fe_very_far_5km']  = (df['fe_dist_km'] >  5.0).astype(int)
+
+        # Kategori zona (string, mudah dibaca)
+        def zona_jarak(d):
+            if d <= 0.05:  return 'SANGAT_DEKAT_50m'
+            if d <= 0.1:   return 'DEKAT_100m'
+            if d <= 0.5:   return 'SEDANG_500m'
+            if d <= 2.0:   return 'JAUH_2km'
+            if d <= 5.0:   return 'SANGAT_JAUH_5km'
+            return 'EKSTREM_5km+'
+
+        df['fe_zona_jarak'] = df['fe_dist_km'].apply(zona_jarak)
+
+        logs.append("📏 Fitur geospasial: fe_dist_km, fe_dist_m, fe_dalam_100m, fe_outside_100m, "
+                    "fe_outside_500m, fe_very_far_5km, fe_zona_jarak")
+
+    # ── E. Fitur Approver ───────────────────────────────────────
+    if 'approver_status' in df.columns:
+        apv = df['approver_status'].astype(str).str.strip().str.upper()
+        df['fe_is_terima']  = apv.str.contains('TERIMA',  na=False).astype(int)
+        df['fe_is_tolak']   = apv.str.contains('TOLAK',   na=False).astype(int)
+        df['fe_is_pending']  = ((apv == '') | (apv == 'NAN') | (apv == 'NONE')).astype(int)
+        logs.append("✅ Fitur approver: fe_is_terima, fe_is_tolak, fe_is_pending")
+
+    # ── F. Fitur Agregat per Karyawan (historis hingga baris ini) ──
+    if 'karyawan_id' in df.columns and 'fe_is_bermasalah' in df.columns:
+        # Jumlah indisipliner kumulatif per karyawan
+        agg_emp = (df.groupby('karyawan_id')['fe_is_bermasalah']
+                   .sum()
+                   .reset_index()
+                   .rename(columns={'fe_is_bermasalah': 'fe_total_indiscipline_karyawan'}))
+        df = pd.merge(df, agg_emp, on='karyawan_id', how='left')
+
+        total_per_emp = df.groupby('karyawan_id').size().reset_index(name='fe_total_absen_karyawan')
+        df = pd.merge(df, total_per_emp, on='karyawan_id', how='left')
+
+        df['fe_pct_indiscipline_karyawan'] = (
+            df['fe_total_indiscipline_karyawan'] / df['fe_total_absen_karyawan'] * 100
+        ).round(2)
+
+        logs.append("👤 Fitur agregat karyawan: fe_total_indiscipline_karyawan, "
+                    "fe_total_absen_karyawan, fe_pct_indiscipline_karyawan")
+
+    return df, logs
+
+
+def _run_preprocessing(df_raw, config):
+    logs = []
+    df   = df_raw.copy()
+
+    # ── Fix desimal ────────────────────────────────────────────
+    df, fixed_cols = fix_decimal_columns(df)
+    if fixed_cols:
+        logs.append(f"🔧 Auto-fix format desimal: {fixed_cols}")
+
+    # ── Format kolom dasar ──────────────────────────────────────
+    if 'tanggal_kirim' in df.columns:
+        df['tanggal_kirim'] = pd.to_datetime(df['tanggal_kirim'], errors='coerce')
+    if 'jenis' in df.columns:
+        df['jenis'] = df['jenis'].astype(str).str.strip().str.upper()
+
     df = df.dropna(subset=['tanggal_kirim', 'karyawan_id', 'jenis'])
     awal_len = len(df)
 
-    # 🧹 STEP 0: Pembersihan Error Absen
-    # 1. Ambil masuk paling AWAL per pegawai per hari
-    df_masuk = df[df['jenis'] == 'M'].sort_values('tanggal_kirim').drop_duplicates(
-        subset=['karyawan_id', 'tanggal'], keep='first')
+    # ────────────────────────────────────────────────────────────
+    # STEP 0: Resolusi Error Absen (Deduplikasi Relasional)
+    # ────────────────────────────────────────────────────────────
+    df['_tanggal_tmp'] = df['tanggal_kirim'].dt.date
 
-    # 2. Ambil pulang paling AKHIR per pegawai per hari
-    df_pulang = df[df['jenis'] == 'P'].sort_values('tanggal_kirim').drop_duplicates(
-        subset=['karyawan_id', 'tanggal'], keep='last')
+    # 1. Masuk paling AWAL per pegawai per hari
+    df_masuk = (df[df['jenis'] == 'M']
+                .sort_values('tanggal_kirim')
+                .drop_duplicates(subset=['karyawan_id', '_tanggal_tmp'], keep='first'))
 
-    # 3. Hapus pulang yang tidak ada riwayat masuknya di hari yang sama
-    valid_pairs = df_masuk[['karyawan_id', 'tanggal']].drop_duplicates()
-    df_pulang = pd.merge(df_pulang, valid_pairs, on=['karyawan_id', 'tanggal'], how='inner')
+    # 2. Pulang paling AKHIR per pegawai per hari
+    df_pulang = (df[df['jenis'] == 'P']
+                 .sort_values('tanggal_kirim')
+                 .drop_duplicates(subset=['karyawan_id', '_tanggal_tmp'], keep='last'))
 
-    # Gabungkan kembali data yang sudah bersih
-    df_out = pd.concat([df_masuk, df_pulang]).sort_values(['karyawan_id', 'tanggal_kirim']).reset_index(drop=True)
+    # 3. Hapus pulang yang tidak ada masuknya di hari sama
+    valid_pairs = df_masuk[['karyawan_id', '_tanggal_tmp']].drop_duplicates()
+    df_pulang   = pd.merge(df_pulang, valid_pairs, on=['karyawan_id', '_tanggal_tmp'], how='inner')
+
+    df_out = (pd.concat([df_masuk, df_pulang])
+              .sort_values(['karyawan_id', 'tanggal_kirim'])
+              .reset_index(drop=True))
+
+    df_out = df_out.drop(columns=['_tanggal_tmp'], errors='ignore')
     akhir_len = len(df_out)
-    logs.append(f"STEP 0: Berhasil menghapus {awal_len - akhir_len} baris error (Double Absen / Pulang tanpa Masuk).")
 
-    # 🔄 STEP 1: Hitung Ulang Status (Jika Dicentang)
-    if config.get('recalc_status'):
-        if 'jam_desimal' not in df_out.columns:
-            df_out['jam'] = df_out['tanggal_kirim'].dt.hour
-            df_out['menit'] = df_out['tanggal_kirim'].dt.minute
-            df_out['jam_desimal'] = df_out['jam'] + df_out['menit'] / 60.0
-        df_out['status_presensi'] = df_out.apply(
-            lambda r: determine_status_from_jam(r['jam_desimal'], r['jenis']), axis=1)
-        logs.append("Status Presensi telah dihitung ulang berdasarkan jam sistem.")
+    n_hapus_double_masuk  = len(df[df['jenis']=='M']) - len(df_masuk)
+    n_hapus_double_pulang = len(df[df['jenis']=='P']) - len(df_pulang)  # sebelum filter pair
+    n_hapus_orphan        = awal_len - akhir_len - n_hapus_double_masuk - max(n_hapus_double_pulang, 0)
 
-    # 🔵 STEP 2: Clustering Algoritma DBSCAN
+    logs.append(
+        f"STEP 0 — Pembersihan Error:\n"
+        f"  • Double absen MASUK dihapus  : {n_hapus_double_masuk:,} baris\n"
+        f"  • Pulang tanpa pasangan Masuk : {max(n_hapus_orphan,0):,} baris\n"
+        f"  • Total baris dihapus         : {awal_len - akhir_len:,} baris\n"
+        f"  • Sisa data bersih            : {akhir_len:,} baris"
+    )
+
+    # ────────────────────────────────────────────────────────────
+    # STEP 1: Feature Engineering Lengkap
+    # (SEMUA kolom baru disimpan ke df_out → ikut ke file output)
+    # ────────────────────────────────────────────────────────────
+    df_out, logs = _engineer_all_features(df_out, config, logs)
+
+    # ────────────────────────────────────────────────────────────
+    # STEP 2: DBSCAN
+    # ────────────────────────────────────────────────────────────
     if config.get('run_dbscan') and SKLEARN_OK:
-        try:
-            # Konversi koordinat ke radian untuk metrik Haversine (jarak bumi nyata)
-            coords = np.radians(df_out[['lat', 'long']].dropna().values)
-            eps_rad = config['eps_km'] / 6371.0 # 6371 adalah jari-jari bumi dalam km
-            
-            db = DBSCAN(eps=eps_rad, min_samples=config['min_samples'], 
-                        algorithm='ball_tree', metric='haversine').fit(coords)
-            
-            df_out.loc[df_out[['lat', 'long']].dropna().index, 'cluster_dbscan'] = db.labels_
-            n_anomali = (db.labels_ == -1).sum()
-            logs.append(f"DBSCAN Selesai: Mendeteksi {n_anomali} absensi di luar radius kewajaran (Anomali -1).")
-            
-            # Buat label risiko agar mudah dibaca di dashboard
-            df_out['risk_level'] = df_out['cluster_dbscan'].apply(lambda x: 'HIGH' if x == -1 else 'LOW')
-        except Exception as e:
-            logs.append(f"DBSCAN Error: {str(e)}")
+        if 'lat' in df_out.columns and 'long' in df_out.columns:
+            try:
+                valid_geo = df_out[['lat', 'long']].dropna()
+                coords    = np.radians(valid_geo.values)
+                eps_rad   = config['eps_km'] / 6371.0
 
-    # 🟣 STEP 3: Algoritma ST-DBSCAN (Spatiotemporal)
+                db = DBSCAN(eps=eps_rad, min_samples=config['min_samples'],
+                            algorithm='ball_tree', metric='haversine').fit(coords)
+
+                # Simpan label cluster ke kolom (termasuk ke file output)
+                df_out.loc[valid_geo.index, 'fe_cluster_dbscan'] = db.labels_
+                df_out['fe_cluster_dbscan'] = df_out['fe_cluster_dbscan'].fillna(-99).astype(int)
+
+                # Label risiko berbasis cluster
+                df_out['fe_risk_dbscan'] = df_out['fe_cluster_dbscan'].apply(
+                    lambda x: 'ANOMALI' if x == -1 else ('TIDAK_VALID' if x == -99 else 'NORMAL'))
+
+                n_anomali = (db.labels_ == -1).sum()
+                n_cluster = len(set(db.labels_)) - (1 if -1 in db.labels_ else 0)
+                logs.append(
+                    f"STEP 2 — DBSCAN Selesai:\n"
+                    f"  • Jumlah cluster      : {n_cluster}\n"
+                    f"  • Titik anomali (-1)  : {n_anomali:,}\n"
+                    f"  • Kolom output        : fe_cluster_dbscan, fe_risk_dbscan"
+                )
+            except Exception as e:
+                logs.append(f"STEP 2 — DBSCAN Error: {str(e)}")
+        else:
+            logs.append("STEP 2 — DBSCAN dilewati: kolom lat/long tidak ditemukan.")
+
+    # ────────────────────────────────────────────────────────────
+    # STEP 3: ST-DBSCAN (placeholder — siap integrasi library)
+    # ────────────────────────────────────────────────────────────
     if config.get('run_stdbscan') and SKLEARN_OK:
         try:
-            # Karena ST-DBSCAN butuh library khusus (st_dbscan), kita buat penanda jalurnya di sini.
-            # Jika Anda memiliki library ST-DBSCAN terinstall, integrasikan fit_predict() di sini.
-            # Sementara menggunakan fallback ke hasil DBSCAN agar dataframe tidak error.
-            df_out['cluster_stdbscan'] = df_out.get('cluster_dbscan', 0) 
-            logs.append("ST-DBSCAN Selesai: Kolom klasifikasi spatiotemporal berhasil ditambahkan.")
+            # Jika library st_dbscan terpasang, ganti bagian ini dengan fit_predict()
+            # from st_dbscan import ST_DBSCAN
+            # st_db = ST_DBSCAN(eps1=..., eps2=..., min_samples=...)
+            # df_out['fe_cluster_stdbscan'] = st_db.fit_predict(...)
+
+            # Fallback: gunakan hasil DBSCAN jika ada, else 0
+            df_out['fe_cluster_stdbscan'] = df_out.get('fe_cluster_dbscan', pd.Series(0, index=df_out.index))
+            df_out['fe_risk_stdbscan']    = df_out['fe_cluster_stdbscan'].apply(
+                lambda x: 'ANOMALI' if x == -1 else 'NORMAL')
+
+            logs.append(
+                "STEP 3 — ST-DBSCAN Selesai:\n"
+                "  • Kolom output: fe_cluster_stdbscan, fe_risk_stdbscan\n"
+                "  • (Saat ini menggunakan fallback DBSCAN — install st_dbscan untuk ST-DBSCAN penuh)"
+            )
         except Exception as e:
-            logs.append(f"ST-DBSCAN Error: {str(e)}")
+            logs.append(f"STEP 3 — ST-DBSCAN Error: {str(e)}")
 
     return df_out, logs
 
+
 # ============================================================
-# PREPROCESSING UI
+# PREPROCESSING UI — dengan tampilan kolom sebelum vs sesudah
 # ============================================================
 def page_preprocessing():
     st.markdown("## 🔧 Preprocessing Data Mentah")
-    local_files=scan_local_files()
-    src_tab1,src_tab2=st.tabs(["📂 Pilih dari folder","⬆️ Upload file baru"])
+
+    # ── Pilih sumber file ───────────────────────────────────────
+    local_files = scan_local_files()
+    src_tab1, src_tab2 = st.tabs(["📂 Pilih dari folder", "⬆️ Upload file baru"])
     with src_tab1:
         if local_files:
-            col_sel,col_info=st.columns([4,1])
-            with col_sel: chosen_raw=st.selectbox("Pilih file mentah",local_files,key='pp_local')
+            col_sel, col_info = st.columns([4, 1])
+            with col_sel: chosen_raw = st.selectbox("Pilih file mentah", local_files, key='pp_local')
             with col_info:
-                st.markdown("<br>",unsafe_allow_html=True)
+                st.markdown("<br>", unsafe_allow_html=True)
                 if chosen_raw and os.path.exists(chosen_raw):
                     st.caption(f"{os.path.getsize(chosen_raw)/1024:,.0f} KB")
-            if st.button("📂 Gunakan File Ini",key='pp_use',use_container_width=True):
-                with open(chosen_raw,'rb') as f_: raw_file_bytes=f_.read()
-                st.session_state['pp_raw_bytes']=raw_file_bytes
-                st.session_state['pp_raw_name']=chosen_raw
-                st.session_state.pop('pp_df_out',None); st.session_state.pop('pp_logs',None)
+            if st.button("📂 Gunakan File Ini", key='pp_use', use_container_width=True):
+                with open(chosen_raw, 'rb') as f_: raw_file_bytes = f_.read()
+                st.session_state['pp_raw_bytes'] = raw_file_bytes
+                st.session_state['pp_raw_name']  = chosen_raw
+                st.session_state.pop('pp_df_out', None)
+                st.session_state.pop('pp_logs', None)
                 st.success(f"✅ **{chosen_raw}** siap diproses.")
-        else: st.info("Belum ada file di folder.")
+        else:
+            st.info("Belum ada file di folder.")
     with src_tab2:
-        uploaded_raw=st.file_uploader("Upload file mentah",type=['csv','xlsx'],key='pp_up')
-        if uploaded_raw and st.session_state.get('pp_raw_name')!=uploaded_raw.name:
-            st.session_state['pp_raw_bytes']=uploaded_raw.getvalue()
-            st.session_state['pp_raw_name']=uploaded_raw.name
-            st.session_state.pop('pp_df_out',None); st.session_state.pop('pp_logs',None)
+        uploaded_raw = st.file_uploader("Upload file mentah", type=['csv', 'xlsx'], key='pp_up')
+        if uploaded_raw and st.session_state.get('pp_raw_name') != uploaded_raw.name:
+            st.session_state['pp_raw_bytes'] = uploaded_raw.getvalue()
+            st.session_state['pp_raw_name']  = uploaded_raw.name
+            st.session_state.pop('pp_df_out', None)
+            st.session_state.pop('pp_logs', None)
 
-    raw_file_bytes=st.session_state.get('pp_raw_bytes')
-    raw_file_name=st.session_state.get('pp_raw_name')
-    if not raw_file_bytes: return
+    raw_file_bytes = st.session_state.get('pp_raw_bytes')
+    raw_file_name  = st.session_state.get('pp_raw_name')
+    if not raw_file_bytes:
+        return
 
     st.markdown(f"📋 **File:** `{raw_file_name}`")
 
-    # ── Info STEP 0 ────────────────────────────────────────────
+    # ── Info STEP 0 ─────────────────────────────────────────────
     st.info(
         "**🧹 STEP 0 — Error Absen (otomatis aktif):**\n"
         "- Double absen MASUK → ambil yang paling **awal**\n"
@@ -1399,90 +1527,238 @@ def page_preprocessing():
         "- Absen PULANG tanpa pasangan MASUK di hari sama → **dihapus**"
     )
 
-    c1,c2,c3=st.columns(3)
+    # ── Kolom hasil feature engineering (info box) ──────────────
+    with st.expander("📐 Kolom Feature Engineering yang akan ditambahkan ke file output", expanded=False):
+        fe_info = pd.DataFrame([
+            # Waktu
+            ["fe_jam",                    "int",    "Jam absensi (0–23)"],
+            ["fe_menit",                  "int",    "Menit absensi (0–59)"],
+            ["fe_detik",                  "int",    "Detik absensi (0–59)"],
+            ["fe_jam_desimal",            "float",  "Jam dalam desimal, mis. 08:30 → 8.5"],
+            ["fe_tanggal",                "date",   "Tanggal saja (tanpa jam)"],
+            ["fe_weekday_num",            "int",    "Hari ke-N (0=Senin … 6=Minggu)"],
+            ["fe_nama_hari",              "str",    "Nama hari (Senin … Minggu)"],
+            ["fe_minggu_ke",              "int",    "Minggu ke-N dalam tahun (ISO)"],
+            ["fe_bulan",                  "int",    "Bulan (1–12)"],
+            ["fe_tahun",                  "int",    "Tahun"],
+            ["fe_kuartal",                "int",    "Kuartal (1–4)"],
+            ["fe_is_weekend",             "0/1",    "1 jika Sabtu/Minggu"],
+            # Status
+            ["fe_status_mapped",          "str",    "Label status deskriptif (hasil mapping kode mesin)"],
+            ["fe_is_bermasalah",          "0/1",    "1 jika termasuk kategori indisipliner"],
+            ["fe_status_num",             "int",    "Status dalam angka (untuk ML), urutan keparahan"],
+            # Deviasi
+            ["fe_menit_telat",            "float",  "Berapa menit terlambat masuk (0 jika tepat/pulang)"],
+            ["fe_menit_pulang_cepat",     "float",  "Berapa menit pulang terlalu cepat (0 jika tepat/masuk)"],
+            # Geospasial
+            ["fe_dist_km",                "float",  "Jarak absensi ke kantor (km, Haversine)"],
+            ["fe_dist_m",                 "float",  "Jarak absensi ke kantor (meter)"],
+            ["fe_dalam_100m",             "0/1",    "1 jika absen ≤ 100m dari kantor"],
+            ["fe_outside_100m",           "0/1",    "1 jika absen > 100m dari kantor"],
+            ["fe_outside_500m",           "0/1",    "1 jika absen > 500m dari kantor"],
+            ["fe_very_far_5km",           "0/1",    "1 jika absen > 5km dari kantor"],
+            ["fe_zona_jarak",             "str",    "Kategori zona jarak (SANGAT_DEKAT … EKSTREM)"],
+            # Approver
+            ["fe_is_terima",              "0/1",    "1 jika atasan TERIMA"],
+            ["fe_is_tolak",               "0/1",    "1 jika atasan TOLAK"],
+            ["fe_is_pending",             "0/1",    "1 jika belum ada keputusan"],
+            # Agregat karyawan
+            ["fe_total_indiscipline_karyawan", "int",   "Total indisipliner karyawan ini (seluruh dataset)"],
+            ["fe_total_absen_karyawan",        "int",   "Total baris absensi karyawan ini"],
+            ["fe_pct_indiscipline_karyawan",   "float", "% indisipliner karyawan ini"],
+            # DBSCAN
+            ["fe_cluster_dbscan",         "int",    "ID cluster DBSCAN (-1 = anomali, -99 = tidak ada GPS)"],
+            ["fe_risk_dbscan",            "str",    "Label risiko DBSCAN: NORMAL / ANOMALI / TIDAK_VALID"],
+            # ST-DBSCAN
+            ["fe_cluster_stdbscan",       "int",    "ID cluster ST-DBSCAN"],
+            ["fe_risk_stdbscan",          "str",    "Label risiko ST-DBSCAN: NORMAL / ANOMALI"],
+        ], columns=["Kolom", "Tipe", "Keterangan"])
+        st.dataframe(fe_info, use_container_width=True, hide_index=True)
+
+    # ── Konfigurasi ─────────────────────────────────────────────
+    c1, c2, c3 = st.columns(3)
     with c1:
-        run_dbscan=st.checkbox("🔵 DBSCAN",value=True)
-        run_stdbscan=st.checkbox("🟣 ST-DBSCAN",value=True)
-        recalc=st.checkbox("🔄 Hitung ulang status",value=False)
+        run_dbscan   = st.checkbox("🔵 DBSCAN",             value=True)
+        run_stdbscan = st.checkbox("🟣 ST-DBSCAN",          value=True)
+        recalc       = st.checkbox("🔄 Hitung ulang status", value=False,
+                                   help="Abaikan status_presensi asli, hitung ulang dari jam_desimal")
     with c2:
-        eps_km=st.number_input("DBSCAN radius (km)",value=0.1,step=0.05,format="%.2f")
-        min_smp=st.number_input("DBSCAN min_samples",value=3,step=1)
-        st_eps_km=st.number_input("ST-DBSCAN radius (km)",value=0.1,step=0.05,format="%.2f")
+        eps_km   = st.number_input("DBSCAN radius (km)",    value=0.1, step=0.05, format="%.2f")
+        min_smp  = st.number_input("DBSCAN min_samples",    value=3,   step=1)
+        st_eps_km = st.number_input("ST-DBSCAN radius (km)", value=0.1, step=0.05, format="%.2f")
     with c3:
-        st_eps_hr=st.number_input("ST-DBSCAN radius (jam)",value=1.0,step=0.5,format="%.1f")
-        st_min_smp=st.number_input("ST-DBSCAN min_samples",value=3,step=1)
+        st_eps_hr  = st.number_input("ST-DBSCAN radius (jam)", value=1.0, step=0.5, format="%.1f")
+        st_min_smp = st.number_input("ST-DBSCAN min_samples",  value=3,   step=1)
 
-    config={'run_dbscan':run_dbscan,'run_stdbscan':run_stdbscan,'recalc_status':recalc,
-            'eps_km':eps_km,'min_samples':int(min_smp),'st_eps_km':st_eps_km,
-            'st_eps_hours':st_eps_hr,'st_min_samples':int(st_min_smp)}
+    config = {
+        'run_dbscan':     run_dbscan,
+        'run_stdbscan':   run_stdbscan,
+        'recalc_status':  recalc,
+        'eps_km':         eps_km,
+        'min_samples':    int(min_smp),
+        'st_eps_km':      st_eps_km,
+        'st_eps_hours':   st_eps_hr,
+        'st_min_samples': int(st_min_smp),
+    }
 
-    run_btn=st.button("🚀 Jalankan Preprocessing",type="primary",use_container_width=True)
-    if not run_btn and 'pp_df_out' not in st.session_state: return
+    run_btn = st.button("🚀 Jalankan Preprocessing", type="primary", use_container_width=True)
+    if not run_btn and 'pp_df_out' not in st.session_state:
+        return
+
     if run_btn:
-        buf=io.BytesIO(raw_file_bytes)
-        try: df_raw=pd.read_csv(buf) if str(raw_file_name).endswith('.csv') else pd.read_excel(buf)
-        except Exception as e: st.error(f"❌ {e}"); return
-        required=['karyawan_id','id_skpd','jenis','lat','long','tanggal_kirim']
-        missing=[c for c in required if c not in df_raw.columns]
-        if missing: st.error(f"❌ Kolom wajib tidak ada: {missing}"); return
-        progress=st.progress(0,"Memulai...")
+        buf = io.BytesIO(raw_file_bytes)
         try:
-            progress.progress(10,"Membersihkan error absen...")
-            df_out,logs=_run_preprocessing(df_raw,config)
-            progress.progress(100,"✅ Selesai!")
-            st.session_state['pp_df_out']=df_out; st.session_state['pp_logs']=logs
+            df_raw = pd.read_csv(buf) if str(raw_file_name).endswith('.csv') else pd.read_excel(buf)
         except Exception as e:
-            import traceback; st.error(f"❌ {e}"); st.code(traceback.format_exc()); return
+            st.error(f"❌ Gagal membaca file: {e}"); return
 
-    if 'pp_df_out' not in st.session_state: return
-    df_out=st.session_state['pp_df_out']; logs=st.session_state.get('pp_logs',[])
+        required = ['karyawan_id', 'id_skpd', 'jenis', 'lat', 'long', 'tanggal_kirim']
+        missing  = [c for c in required if c not in df_raw.columns]
+        if missing:
+            st.error(f"❌ Kolom wajib tidak ada: {missing}"); return
 
+        progress = st.progress(0, "Memulai preprocessing...")
+        try:
+            progress.progress(10, "🧹 STEP 0: Membersihkan error absen...")
+            df_out, logs = _run_preprocessing(df_raw, config)
+            progress.progress(100, "✅ Selesai!")
+            st.session_state['pp_df_out']  = df_out
+            st.session_state['pp_logs']    = logs
+            st.session_state['pp_df_raw']  = df_raw   # simpan data mentah untuk perbandingan
+        except Exception as e:
+            import traceback
+            st.error(f"❌ Error saat preprocessing: {e}")
+            st.code(traceback.format_exc())
+            return
+
+    if 'pp_df_out' not in st.session_state:
+        return
+
+    df_out = st.session_state['pp_df_out']
+    logs   = st.session_state.get('pp_logs', [])
+    df_raw_saved = st.session_state.get('pp_df_raw')
+
+    # ── Log Preprocessing ───────────────────────────────────────
     if logs:
         st.markdown("### 📋 Log Preprocessing")
-        # Pisahkan log STEP 0 agar mudah dibaca
         step0_logs = [l for l in logs if 'STEP 0' in l]
         other_logs  = [l for l in logs if 'STEP 0' not in l]
         if step0_logs:
-            with st.expander("🧹 Detail STEP 0 — Error Absen", expanded=True):
+            with st.expander("🧹 Detail STEP 0 — Pembersihan Error Absen", expanded=True):
                 for lg in step0_logs:
-                    st.markdown(f"- {lg}")
+                    st.code(lg)
         for lg in other_logs:
             st.markdown(f"- {lg}")
 
-    c1,c2,c3,c4=st.columns(4)
-    with c1: st.metric("Total",f"{len(df_out):,}")
-    with c2: st.metric("Karyawan",f"{df_out['karyawan_id'].nunique():,}")
-    with c3: st.metric("SKPD",f"{df_out['id_skpd'].nunique():,}")
-    with c4: st.metric("HIGH Risk",f"{(df_out.get('risk_level',pd.Series())=='HIGH').sum():,}")
+    # ── Metrik Ringkasan ────────────────────────────────────────
+    c1, c2, c3, c4, c5 = st.columns(5)
+    with c1: st.metric("Baris Output",   f"{len(df_out):,}")
+    with c2: st.metric("Kolom Output",   f"{len(df_out.columns):,}")
+    with c3: st.metric("Karyawan",       f"{df_out['karyawan_id'].nunique():,}")
+    with c4: st.metric("SKPD",           f"{df_out['id_skpd'].nunique():,}")
+    if 'fe_risk_dbscan' in df_out.columns:
+        n_anom = (df_out['fe_risk_dbscan'] == 'ANOMALI').sum()
+        with c5: st.metric("🔴 DBSCAN Anomali", f"{n_anom:,}")
 
-    with st.expander("🔍 Preview",expanded=True):
-        st.dataframe(df_out.head(10),use_container_width=True)
+    # ── Perbandingan Sebelum vs Sesudah ─────────────────────────
+    st.markdown("---")
+    st.markdown("### 🔄 Perbandingan: Sebelum vs Sesudah Preprocessing")
 
-    dc1,dc2=st.columns(2)
+    tab_before, tab_after, tab_compare = st.tabs([
+        "📋 Data SEBELUM (Mentah)",
+        "✅ Data SESUDAH (Preprocessed + Feature Engineering)",
+        "🔍 Kolom Baru yang Ditambahkan"
+    ])
+
+    with tab_before:
+        if df_raw_saved is not None:
+            st.caption(f"**{len(df_raw_saved):,} baris** | **{len(df_raw_saved.columns)} kolom** — data asli belum disentuh")
+            st.dataframe(df_raw_saved.head(20), use_container_width=True, height=400)
+        else:
+            st.info("Data mentah tidak tersimpan di sesi ini.")
+
+    with tab_after:
+        st.caption(
+            f"**{len(df_out):,} baris** | **{len(df_out.columns)} kolom** "
+            f"— sudah bersih + semua kolom feature engineering ikut tersimpan"
+        )
+        # Urutkan: kolom asli dulu, kolom fe_ belakangan
+        orig_cols = [c for c in df_out.columns if not c.startswith('fe_')]
+        fe_cols   = [c for c in df_out.columns if c.startswith('fe_')]
+        st.dataframe(df_out[orig_cols + fe_cols].head(20), use_container_width=True, height=400)
+
+    with tab_compare:
+        if df_raw_saved is not None:
+            new_cols = [c for c in df_out.columns if c not in df_raw_saved.columns]
+            st.markdown(f"**{len(new_cols)} kolom baru** ditambahkan oleh proses preprocessing:")
+            compare_info = []
+            for col in new_cols:
+                sample_vals = df_out[col].dropna().head(3).tolist()
+                compare_info.append({
+                    "Kolom Baru":    col,
+                    "Tipe Data":     str(df_out[col].dtype),
+                    "Contoh Nilai":  str(sample_vals)
+                })
+            st.dataframe(pd.DataFrame(compare_info), use_container_width=True, hide_index=True)
+        else:
+            st.info("Jalankan preprocessing untuk melihat perbandingan kolom.")
+
+    # ── Download Output ─────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("### ⬇️ Download Hasil Preprocessing")
+    st.info(
+        "💡 File yang didownload sudah berisi **semua kolom asli + kolom feature engineering** "
+        "(kolom yang diawali `fe_`). Anda bisa langsung membandingkan dengan file mentah."
+    )
+
+    # Urutkan kolom: asli dulu, fe_ belakangan
+    orig_cols_out = [c for c in df_out.columns if not c.startswith('fe_')]
+    fe_cols_out   = [c for c in df_out.columns if c.startswith('fe_')]
+    df_export     = df_out[orig_cols_out + fe_cols_out]
+
+    dc1, dc2 = st.columns(2)
     with dc1:
-        st.download_button("📄 CSV",df_out.to_csv(index=False).encode('utf-8'),
-                           "absensi_preprocessed.csv","text/csv",use_container_width=True)
+        st.download_button(
+            "📄 Download CSV",
+            df_export.to_csv(index=False).encode('utf-8'),
+            "absensi_preprocessed.csv",
+            "text/csv",
+            use_container_width=True
+        )
     with dc2:
-        xl=io.BytesIO(); df_out.to_excel(xl,index=False)
-        st.download_button("📊 Excel",xl.getvalue(),"absensi_preprocessed.xlsx",
-                           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                           use_container_width=True)
+        xl = io.BytesIO()
+        df_export.to_excel(xl, index=False)
+        st.download_button(
+            "📊 Download Excel",
+            xl.getvalue(),
+            "absensi_preprocessed.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+
+    # ── Statistik Deskriptif Kolom fe_ ─────────────────────────
+    if fe_cols_out:
+        with st.expander("📈 Statistik Deskriptif Kolom Feature Engineering", expanded=False):
+            fe_numeric = df_out[fe_cols_out].select_dtypes(include='number')
+            if not fe_numeric.empty:
+                st.dataframe(fe_numeric.describe().T.round(4), use_container_width=True)
 
 # ============================================================
 # MAIN
 # ============================================================
 def main():
-    for key,default in [('df',None),('office_centroid',pd.DataFrame())]:
-        if key not in st.session_state: st.session_state[key] = default
+    for key, default in [('df', None), ('office_centroid', pd.DataFrame())]:
+        if key not in st.session_state:
+            st.session_state[key] = default
 
     page, filters = render_sidebar()
 
     pages = {
-        "🏠 Beranda":     page_beranda,
-        "📥 Upload Data": page_upload,
-        "📊 Visualisasi": lambda: page_visualisasi(filters),
-        "🎯 Hunting":     page_hunting,
-        # "🔧 Preprocessing": page_preprocessing,  # AKTIFKAN PREPROCESSING: uncomment + tambah ke nav_pages
+        "🏠 Beranda":       page_beranda,
+        "📥 Upload Data":   page_upload,
+        "📊 Visualisasi":   lambda: page_visualisasi(filters),
+        "🎯 Hunting":       page_hunting,
+        "🔧 Preprocessing": page_preprocessing,  # ← AKTIF
     }
     pages.get(page, page_beranda)()
 
