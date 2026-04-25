@@ -1405,9 +1405,9 @@ def _run_preprocessing(df_raw, config):
     n_hapus_orphan        = awal_len - akhir_len - n_hapus_double_masuk - max(n_hapus_double_pulang, 0)
 
     logs.append(
-        f"STEP 0 — Pembersihan Error:\n"
+        f"Pembersihan Error:\n"
         f"  • Double absen MASUK dihapus  : {n_hapus_double_masuk:,} baris\n"
-        f"  • Pulang tanpa pasangan Masuk : {max(n_hapus_orphan,0):,} baris\n"
+        # f"  • Pulang tanpa pasangan Masuk : {max(n_hapus_orphan,0):,} baris\n"
         f"  • Total baris dihapus         : {awal_len - akhir_len:,} baris\n"
         f"  • Sisa data bersih            : {akhir_len:,} baris"
     )
@@ -1521,10 +1521,10 @@ def page_preprocessing():
 
     # ── Info STEP 0 ─────────────────────────────────────────────
     st.info(
-        "**🧹 STEP 0 — Error Absen (otomatis aktif):**\n"
+        "**🧹 Error Absen :**\n"
         "- Double absen MASUK → ambil yang paling **awal**\n"
         "- Double absen PULANG → ambil yang paling **akhir**\n"
-        "- Absen PULANG tanpa pasangan MASUK di hari sama → **dihapus**"
+        # "- Absen PULANG tanpa pasangan MASUK di hari sama → **dihapus**"
     )
 
     # ── Kolom hasil feature engineering (info box) ──────────────
@@ -1632,7 +1632,7 @@ def page_preprocessing():
 
         progress = st.progress(0, "Memulai preprocessing...")
         try:
-            progress.progress(10, "🧹 STEP 0: Membersihkan error absen...")
+            progress.progress(10, "🧹 Membersihkan error absen...")
             df_out, logs = _run_preprocessing(df_raw, config)
             progress.progress(100, "✅ Selesai!")
             st.session_state['pp_df_out']  = df_out
@@ -1657,7 +1657,7 @@ def page_preprocessing():
         step0_logs = [l for l in logs if 'STEP 0' in l]
         other_logs  = [l for l in logs if 'STEP 0' not in l]
         if step0_logs:
-            with st.expander("🧹 Detail STEP 0 — Pembersihan Error Absen", expanded=True):
+            with st.expander("🧹 Detail Pembersihan Error Absen", expanded=True):
                 for lg in step0_logs:
                     st.code(lg)
         for lg in other_logs:
